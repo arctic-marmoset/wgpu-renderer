@@ -1,0 +1,9 @@
+ColumnLimit: 100
+IndentWidth: 4
+Cpp11BracedListStyle: false
+IndentPPDirectives: AfterHash
+PPIndentWidth: 2
+AlignConsecutiveMacros: AcrossEmptyLines
+AlignAfterOpenBracket: BlockIndent
+BinPackArguments: false
+AllowAllArgumentsOnNextLine: false

@@ -1,0 +1,9 @@
+[submodule "extern/wgpu-native/wgpu-native"]
+	path = extern/wgpu-native/wgpu-native
+	url = https://github.com/gfx-rs/wgpu-native.git
+[submodule "extern/ktx/KTX-Software"]
+	path = extern/ktx/KTX-Software
+	url = https://github.com/KhronosGroup/KTX-Software.git
+[submodule "extern/cglm/cglm"]
+	path = extern/cglm/cglm
+	url = https://github.com/recp/cglm.git

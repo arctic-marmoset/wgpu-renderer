@@ -1,0 +1,3 @@
+-Iextern/wgpu-native/wgpu-native/ffi
+-Iextern/wgpu-native/wgpu-native/ffi/webgpu-headers
+-Izig-out/include

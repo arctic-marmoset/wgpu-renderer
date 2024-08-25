@@ -1,0 +1,29 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch (Windows)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceRoot}/zig-out/bin/wgpu-renderer",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}",
+            "environment": [],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Launch (macOS)",
+            "type": "lldb",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceRoot}/zig-out/bin/wgpu-renderer",
+            "args": [],
+            "cwd": "${workspaceRoot}"
+        }
+    ]
+}

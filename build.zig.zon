@@ -1,0 +1,31 @@
+.{
+    .name = "wgpu-renderer",
+    .version = "0.0.0",
+    .minimum_zig_version = "0.13.0",
+    .dependencies = .{
+        .cglm = .{
+            .path = "extern/cglm",
+        },
+        .glfw = .{
+            .url = "https://github.com/slimsag/glfw/archive/refs/heads/master.zip",
+            .hash = "1220c15e66c13f9633fcfd50b5ed265f74f2950c98b1f1defd66298fa027765e0190",
+        },
+        .ktx = .{
+            .path = "extern/ktx",
+        },
+        .@"wgpu-native" = .{
+            .path = "extern/wgpu-native",
+        },
+        .zgltf = .{
+            .url = "git+https://github.com/kooparse/zgltf.git#17fb60b270fa25b3e07b7b3cdb253f86747f9616",
+            .hash = "1220ff2dbebeb83461da67b185d994ae61ebcea747c1bfbfb48b23c8e456cc53ea83",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src/",
+        "build/",
+        "extern/",
+    },
+}
