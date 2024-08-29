@@ -68,9 +68,6 @@ pub fn build(b: *std.Build) !void {
     }
     exe.addIncludePath(b.path("src"));
     exe.root_module.addImport("Gltf", zgltf.module("zgltf"));
-    // FIXME: It would be nice if we could avoid linking the actual CGLM library
-    //        since we're actually using the header-only interface. Linking here
-    //        just increases code size for no reason.
     exe.linkLibrary(cglm.artifact("cglm"));
     exe.linkLibrary(glfw.artifact("glfw"));
     exe.linkLibrary(ktx.artifact("ktx"));
@@ -106,8 +103,8 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
         .out_dir_path = "data/shaders",
         .sources = &.{
-            "shaders/src/triangle.vs.hlsl",
-            "shaders/src/triangle.fs.hlsl",
+            "shaders/src/triangle.vert",
+            "shaders/src/triangle.frag",
         },
     });
 

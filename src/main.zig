@@ -182,11 +182,36 @@ pub fn main() !void {
     });
     defer c.wgpuSurfaceUnconfigure(surface);
 
+    const Uniform = extern struct {
+        model: c.mat4 align(32),
+        view: c.mat4 align(32),
+        proj: c.mat4 align(32),
+    };
+    const bind_group_layout = c.wgpuDeviceCreateBindGroupLayout(device, &.{
+        .entryCount = 1,
+        .entries = &.{
+            .binding = 0,
+            .visibility = c.WGPUShaderStage_Vertex,
+            .buffer = .{
+                .type = c.WGPUBufferBindingType_Uniform,
+                .hasDynamicOffset = @intFromBool(false),
+                .minBindingSize = @sizeOf(Uniform),
+            },
+        },
+    });
+    defer c.wgpuBindGroupLayoutRelease(bind_group_layout);
+
+    const pipeline_layout = c.wgpuDeviceCreatePipelineLayout(device, &.{
+        .bindGroupLayoutCount = 1,
+        .bindGroupLayouts = &bind_group_layout,
+    });
+    defer c.wgpuPipelineLayoutRelease(pipeline_layout);
+
     const vs_module = try wgpu.deviceCreateShaderModuleSPIRV(
         device,
         gpa.allocator(),
         data_dir,
-        "shaders/triangle.vs.spv",
+        "shaders/triangle.vert.spv",
     );
     defer c.wgpuShaderModuleRelease(vs_module);
 
@@ -194,7 +219,7 @@ pub fn main() !void {
         device,
         gpa.allocator(),
         data_dir,
-        "shaders/triangle.fs.spv",
+        "shaders/triangle.frag.spv",
     );
     defer c.wgpuShaderModuleRelease(fs_module);
 
@@ -202,7 +227,7 @@ pub fn main() !void {
     const vertex_attributes = wgpu.vertexAttributesFromType(Vertex, .{});
 
     const pipeline = c.wgpuDeviceCreateRenderPipeline(device, &.{
-        .layout = null,
+        .layout = pipeline_layout,
         .vertex = .{
             .module = vs_module,
             .entryPoint = "main",
@@ -249,8 +274,38 @@ pub fn main() !void {
     });
     defer c.wgpuRenderPipelineRelease(pipeline);
 
+    var mat4_identity: c.mat4 align(32) = undefined;
+    c.glm_mat4_identity(&mat4_identity);
+    var camera_position: c.vec3 = .{ 0.0, 0.0, -1.0 };
+    var camera_target: c.vec3 = .{ 0.0, 0.0, 1.0 };
+    var camera_up: c.vec3 = .{ 0.0, 1.0, 0.0 };
+    const aspect_ratio =
+        @as(f32, @floatFromInt(framebuffer_size.width)) / @as(f32, @floatFromInt(framebuffer_size.height));
+    var uniform: Uniform = undefined;
+    uniform.model = mat4_identity;
+    c.glm_lookat(&camera_position, &camera_target, &camera_up, &uniform.view);
+    c.glm_perspective(std.math.degreesToRadians(80.0), aspect_ratio, 0.01, 100.0, &uniform.proj);
+    const uniform_buffer = c.wgpuDeviceCreateBuffer(device, &.{
+        .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
+        .size = @sizeOf(Uniform),
+    });
+    defer c.wgpuBufferRelease(uniform_buffer);
+    defer c.wgpuBufferDestroy(uniform_buffer);
+    c.wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniform, @sizeOf(Uniform));
+    const bind_group = c.wgpuDeviceCreateBindGroup(device, &.{
+        .layout = bind_group_layout,
+        .entryCount = 1,
+        .entries = &.{
+            .binding = 0,
+            .buffer = uniform_buffer,
+            .offset = 0,
+            .size = @sizeOf(Uniform),
+        },
+    });
+    defer c.wgpuBindGroupRelease(bind_group);
+
     // TODO: Maybe factor this out into a separate function.
-    const triangle_data = try data_dir.readFileAllocOptions(
+    const model_data = try data_dir.readFileAllocOptions(
         gpa.allocator(),
         "meshes/triangle.glb",
         4 * 1024,
@@ -258,24 +313,24 @@ pub fn main() !void {
         @alignOf(u32),
         null,
     );
-    defer gpa.allocator().free(triangle_data);
-    var triangle_gltf = Gltf.init(gpa.allocator());
-    defer triangle_gltf.deinit();
-    try triangle_gltf.parse(triangle_data);
-    const gltf_scene_index = triangle_gltf.data.scene.?;
-    const gltf_scene = triangle_gltf.data.scenes.items[gltf_scene_index];
+    defer gpa.allocator().free(model_data);
+    var gltf_model = Gltf.init(gpa.allocator());
+    defer gltf_model.deinit();
+    try gltf_model.parse(model_data);
+    const gltf_scene_index = gltf_model.data.scene.?;
+    const gltf_scene = gltf_model.data.scenes.items[gltf_scene_index];
     const gltf_node_index = gltf_scene.nodes.?.items[0];
-    const gltf_node = triangle_gltf.data.nodes.items[gltf_node_index];
+    const gltf_node = gltf_model.data.nodes.items[gltf_node_index];
     const gltf_mesh_index = gltf_node.mesh.?;
-    const gltf_mesh = triangle_gltf.data.meshes.items[gltf_mesh_index];
+    const gltf_mesh = gltf_model.data.meshes.items[gltf_mesh_index];
     var vertex_count: usize = 0;
     var index_count: usize = 0;
     for (gltf_mesh.primitives.items) |primitive| {
-        index_count += @intCast(triangle_gltf.data.accessors.items[primitive.indices.?].count);
+        index_count += @intCast(gltf_model.data.accessors.items[primitive.indices.?].count);
         for (primitive.attributes.items) |attribute| {
             switch (attribute) {
                 .position => |index| {
-                    vertex_count += @intCast(triangle_gltf.data.accessors.items[index].count);
+                    vertex_count += @intCast(gltf_model.data.accessors.items[index].count);
                     break;
                 },
                 else => {},
@@ -294,17 +349,20 @@ pub fn main() !void {
         for (primitive.attributes.items) |attribute| {
             switch (attribute) {
                 .position => |index| {
-                    position_accessor = triangle_gltf.data.accessors.items[index];
+                    position_accessor = gltf_model.data.accessors.items[index];
                 },
+                // NOTE: This actually isn't populated by zgltf. I'm using a
+                // modified version as a temporary solution. I haven't pushed it
+                // because I won't be using vertex colours later anyway.
                 .color => |index| {
-                    color_accessor = triangle_gltf.data.accessors.items[index];
+                    color_accessor = gltf_model.data.accessors.items[index];
                 },
                 else => {},
             }
         }
 
-        var position_iter = position_accessor.iterator(f32, &triangle_gltf, triangle_gltf.glb_binary.?);
-        var color_iter = color_accessor.iterator(u16, &triangle_gltf, triangle_gltf.glb_binary.?);
+        var position_iter = position_accessor.iterator(f32, &gltf_model, gltf_model.glb_binary.?);
+        var color_iter = color_accessor.iterator(u16, &gltf_model, gltf_model.glb_binary.?);
         while (position_iter.next()) |position| : (vertex_cursor += 1) {
             const color = color_iter.next().?[0..][0..3];
             const r: f32 = @floatFromInt(color[0]);
@@ -321,24 +379,35 @@ pub fn main() !void {
             };
         }
 
-        const index_accessor = triangle_gltf.data.accessors.items[primitive.indices.?];
+        const index_accessor = gltf_model.data.accessors.items[primitive.indices.?];
         std.debug.assert(index_accessor.component_type == .unsigned_short);
-        var index_iter = index_accessor.iterator(u16, &triangle_gltf, triangle_gltf.glb_binary.?);
+        var index_iter = index_accessor.iterator(u16, &gltf_model, gltf_model.glb_binary.?);
         while (index_iter.next()) |index| : (index_cursor += 1) {
             indices[index_cursor] = index[0];
         }
     }
     const vbo = c.wgpuDeviceCreateBuffer(device, &.{
-        .label = "Vertex Buffer: Triangle",
         .usage = c.WGPUBufferUsage_Vertex | c.WGPUBufferUsage_CopyDst,
         .size = mem.sizeOfElements(vertices),
     });
     defer c.wgpuBufferRelease(vbo);
     defer c.wgpuBufferDestroy(vbo);
     c.wgpuQueueWriteBuffer(queue, vbo, 0, vertices.ptr, mem.sizeOfElements(vertices));
+    const ibo = c.wgpuDeviceCreateBuffer(device, &.{
+        .usage = c.WGPUBufferUsage_Index | c.WGPUBufferUsage_CopyDst,
+        .size = mem.sizeOfElements(indices),
+    });
+    defer c.wgpuBufferRelease(ibo);
+    defer c.wgpuBufferDestroy(ibo);
+    c.wgpuQueueWriteBuffer(queue, ibo, 0, indices.ptr, mem.sizeOfElements(indices));
 
     while (c.glfwWindowShouldClose(window) != c.GLFW_TRUE) {
         c.glfwPollEvents();
+
+        const time: f32 = @floatCast(c.glfwGetTime());
+        // FIXME: Must use the `call` interface because translate-c fails to translate `glm_mul_rot_sse2`.
+        c.glmc_rotate_z(&mat4_identity, time, &uniform.model);
+        c.wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniform, @sizeOf(Uniform));
 
         const view = wgpu.surfaceGetNextTextureView(
             surface,
@@ -360,8 +429,10 @@ pub fn main() !void {
         });
         defer c.wgpuRenderPassEncoderRelease(render_pass);
         c.wgpuRenderPassEncoderSetPipeline(render_pass, pipeline);
+        c.wgpuRenderPassEncoderSetBindGroup(render_pass, 0, bind_group, 0, null);
         c.wgpuRenderPassEncoderSetVertexBuffer(render_pass, 0, vbo, 0, mem.sizeOfElements(vertices));
-        c.wgpuRenderPassEncoderDraw(render_pass, @intCast(vertices.len), 1, 0, 0);
+        c.wgpuRenderPassEncoderSetIndexBuffer(render_pass, ibo, c.WGPUIndexFormat_Uint32, 0, mem.sizeOfElements(indices));
+        c.wgpuRenderPassEncoderDrawIndexed(render_pass, @intCast(indices.len), 1, 0, 0, 0);
         c.wgpuRenderPassEncoderEnd(render_pass);
 
         const command_buffer = c.wgpuCommandEncoderFinish(encoder, &.{});
