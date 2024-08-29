@@ -226,6 +226,8 @@ pub fn main() !void {
     const Vertex = struct { position: c.vec3, color: c.vec3 };
     const vertex_attributes = wgpu.vertexAttributesFromType(Vertex, .{});
 
+    const depth_format = c.WGPUTextureFormat_Depth32Float;
+
     const pipeline = c.wgpuDeviceCreateRenderPipeline(device, &.{
         .layout = pipeline_layout,
         .vertex = .{
@@ -244,7 +246,28 @@ pub fn main() !void {
             .frontFace = c.WGPUFrontFace_CCW,
             .cullMode = c.WGPUCullMode_Back,
         },
-        .depthStencil = null,
+        .depthStencil = &.{
+            .format = depth_format,
+            .depthWriteEnabled = @intFromBool(true),
+            .depthCompare = c.WGPUCompareFunction_LessEqual,
+            .stencilFront = .{
+                .compare = c.WGPUCompareFunction_Always,
+                .failOp = c.WGPUStencilOperation_Keep,
+                .depthFailOp = c.WGPUStencilOperation_Keep,
+                .passOp = c.WGPUStencilOperation_Keep,
+            },
+            .stencilBack = .{
+                .compare = c.WGPUCompareFunction_Always,
+                .failOp = c.WGPUStencilOperation_Keep,
+                .depthFailOp = c.WGPUStencilOperation_Keep,
+                .passOp = c.WGPUStencilOperation_Keep,
+            },
+            .stencilReadMask = ~@as(u32, 0),
+            .stencilWriteMask = ~@as(u32, 0),
+            .depthBias = 0,
+            .depthBiasSlopeScale = 0,
+            .depthBiasClamp = 0,
+        },
         .multisample = .{
             .count = 1,
             .mask = ~@as(u32, 0),
@@ -273,6 +296,33 @@ pub fn main() !void {
         },
     });
     defer c.wgpuRenderPipelineRelease(pipeline);
+
+    const depth_texture = c.wgpuDeviceCreateTexture(device, &.{
+        .usage = c.WGPUTextureUsage_RenderAttachment,
+        .dimension = c.WGPUTextureDimension_2D,
+        .size = .{
+            .width = framebuffer_size.width,
+            .height = framebuffer_size.height,
+            .depthOrArrayLayers = 1,
+        },
+        .format = depth_format,
+        .mipLevelCount = 1,
+        .sampleCount = 1,
+        .viewFormatCount = 1,
+        .viewFormats = &depth_format,
+    });
+    defer c.wgpuTextureRelease(depth_texture);
+    defer c.wgpuTextureDestroy(depth_texture);
+    const depth_texture_view = c.wgpuTextureCreateView(depth_texture, &.{
+        .format = depth_format,
+        .dimension = c.WGPUTextureViewDimension_2D,
+        .baseMipLevel = 0,
+        .mipLevelCount = 1,
+        .baseArrayLayer = 0,
+        .arrayLayerCount = 1,
+        .aspect = c.WGPUTextureAspect_DepthOnly,
+    });
+    defer c.wgpuTextureViewRelease(depth_texture_view);
 
     var mat4_identity: c.mat4 align(32) = undefined;
     c.glm_mat4_identity(&mat4_identity);
@@ -426,6 +476,13 @@ pub fn main() !void {
                 .loadOp = c.WGPULoadOp_Clear,
                 .storeOp = c.WGPUStoreOp_Store,
                 .clearValue = wgpu.color(1.0, 0.0, 1.0, 1.0),
+            },
+            .depthStencilAttachment = &.{
+                .view = depth_texture_view,
+                .depthLoadOp = c.WGPULoadOp_Clear,
+                .depthStoreOp = c.WGPUStoreOp_Store,
+                .depthClearValue = 1.0,
+                .depthReadOnly = @intFromBool(false),
             },
         });
         defer c.wgpuRenderPassEncoderRelease(render_pass);
