@@ -6,6 +6,7 @@ pub const ShadersOptions = struct {
     step_name: []const u8,
     description: []const u8,
     optimize: std.builtin.OptimizeMode,
+    ignore_optimize: bool = true,
     debug_symbols: bool = false,
     out_dir_path: []const u8 = "shaders",
     sources: []const []const u8 = &.{},
@@ -22,7 +23,9 @@ pub fn buildShaders(
     b: *std.Build,
     options: ShadersOptions,
 ) *std.Build.Step {
-    const optimize_flags: []const []const u8 = switch (options.optimize) {
+    const optimize_flags: []const []const u8 = if (options.ignore_optimize)
+        &.{}
+    else switch (options.optimize) {
         .Debug => &.{"-O0"},
         .ReleaseSmall => &.{"-Os"},
         else => &.{"-O"},

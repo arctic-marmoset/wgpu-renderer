@@ -79,14 +79,14 @@ pub fn build(b: *std.Build) void {
     lib.addCSourceFiles(.{
         .files = &cxx_sources,
     });
+    lib.defineCMacro("LIBKTX", null);
+    lib.defineCMacro(
+        "SUPPORT_SOFTWARE_ETC_UNPACK",
+        b.fmt("{}", .{@intFromBool(feature_etc_unpack)}),
+    );
     if (optimize == .Debug) {
         lib.defineCMacro("_DEBUG", null);
         lib.defineCMacro("DEBUG", null);
-        lib.defineCMacro("LIBKTX", null);
-        lib.defineCMacro(
-            "SUPPORT_SOFTWARE_ETC_UNPACK",
-            b.fmt("{}", .{@intFromBool(feature_etc_unpack)}),
-        );
     }
     lib.linkLibC();
     if (!(target.result.os.tag == .windows and target.result.abi == .msvc)) {
