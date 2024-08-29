@@ -249,7 +249,7 @@ pub fn main() !void {
         .depthStencil = &.{
             .format = depth_format,
             .depthWriteEnabled = @intFromBool(true),
-            .depthCompare = c.WGPUCompareFunction_LessEqual,
+            .depthCompare = c.WGPUCompareFunction_GreaterEqual,
             .stencilFront = .{
                 .compare = c.WGPUCompareFunction_Always,
                 .failOp = c.WGPUStencilOperation_Keep,
@@ -334,7 +334,7 @@ pub fn main() !void {
     var uniform: Uniform = undefined;
     uniform.model = mat4_identity;
     c.glm_lookat(&camera_position, &camera_target, &camera_up, &uniform.view);
-    c.glm_perspective(std.math.degreesToRadians(80.0), aspect_ratio, 0.01, 100.0, &uniform.proj);
+    perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01, &uniform.proj);
     const uniform_buffer = c.wgpuDeviceCreateBuffer(device, &.{
         .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
         .size = @sizeOf(Uniform),
@@ -481,7 +481,7 @@ pub fn main() !void {
                 .view = depth_texture_view,
                 .depthLoadOp = c.WGPULoadOp_Clear,
                 .depthStoreOp = c.WGPUStoreOp_Store,
-                .depthClearValue = 1.0,
+                .depthClearValue = 0.0,
                 .depthReadOnly = @intFromBool(false),
             },
         });
@@ -508,6 +508,27 @@ fn openDataDir(allocator: std.mem.Allocator) !std.fs.Dir {
     const data_dir_path = try std.fs.path.join(allocator, &.{ exe_dir_path, "..", "data" });
     defer allocator.free(data_dir_path);
     return std.fs.openDirAbsolute(data_dir_path, .{});
+}
+
+fn perspectiveInverseDepth(
+    vfov: f32,
+    aspect: f32,
+    near: f32,
+    destination: *align(32) c.mat4,
+) void {
+    const focal_length = 1.0 / @tan(vfov / 2.0);
+
+    const x = focal_length / aspect;
+    const y = focal_length;
+    const a = 0.0;
+    const b = near;
+
+    c.glm_mat4_zero(destination);
+    destination[0][0] = x;
+    destination[1][1] = y;
+    destination[2][2] = a;
+    destination[2][3] = 1.0;
+    destination[3][2] = b;
 }
 
 fn onDeviceLost(
