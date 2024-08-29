@@ -276,7 +276,7 @@ pub fn main() !void {
 
     var mat4_identity: c.mat4 align(32) = undefined;
     c.glm_mat4_identity(&mat4_identity);
-    var camera_position: c.vec3 = .{ 0.0, 0.0, -1.0 };
+    var camera_position: c.vec3 = .{ 0.0, 0.0, -5.0 };
     var camera_target: c.vec3 = .{ 0.0, 0.0, 1.0 };
     var camera_up: c.vec3 = .{ 0.0, 1.0, 0.0 };
     const aspect_ratio =
@@ -307,7 +307,7 @@ pub fn main() !void {
     // TODO: Maybe factor this out into a separate function.
     const model_data = try data_dir.readFileAllocOptions(
         gpa.allocator(),
-        "meshes/triangle.glb",
+        "meshes/cube.glb",
         4 * 1024,
         null,
         @alignOf(u32),
@@ -406,7 +406,8 @@ pub fn main() !void {
 
         const time: f32 = @floatCast(c.glfwGetTime());
         // FIXME: Must use the `call` interface because translate-c fails to translate `glm_mul_rot_sse2`.
-        c.glmc_rotate_z(&mat4_identity, time, &uniform.model);
+        c.glmc_rotate_y(&mat4_identity, std.math.degreesToRadians(45.0), &uniform.model);
+        c.glmc_rotate_z(&uniform.model, time, &uniform.model);
         c.wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniform, @sizeOf(Uniform));
 
         const view = wgpu.surfaceGetNextTextureView(
