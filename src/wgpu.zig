@@ -209,6 +209,84 @@ pub fn deviceCreateShaderModuleSPIRV(
     });
 }
 
+fn vertexFormatFromType(comptime T: type, comptime normalized: bool) c.WGPUVertexFormat {
+    return switch (T) {
+        [2]u8 => if (normalized) c.WGPUVertexFormat_Unorm8x2 else c.WGPUVertexFormat_Uint8x2,
+        [4]u8 => if (normalized) c.WGPUVertexFormat_Unorm8x4 else c.WGPUVertexFormat_Uint8x4,
+        [2]i8 => if (normalized) c.WGPUVertexFormat_Snorm8x2 else c.WGPUVertexFormat_Sint8x2,
+        [4]i8 => if (normalized) c.WGPUVertexFormat_Snorm8x4 else c.WGPUVertexFormat_Sint8x4,
+        [2]u16 => if (normalized) c.WGPUVertexFormat_Unorm16x2 else c.WGPUVertexFormat_Uint16x2,
+        [4]u16 => if (normalized) c.WGPUVertexFormat_Unorm16x4 else c.WGPUVertexFormat_Uint16x4,
+        [2]i16 => if (normalized) c.WGPUVertexFormat_Snorm16x2 else c.WGPUVertexFormat_Sint16x2,
+        [4]i16 => if (normalized) c.WGPUVertexFormat_Snorm16x4 else c.WGPUVertexFormat_Sint16x4,
+        [2]f16 => c.WGPUVertexFormat_Float16x2,
+        [4]f16 => c.WGPUVertexFormat_Float16x4,
+        f32 => c.WGPUVertexFormat_Float32,
+        [2]f32 => c.WGPUVertexFormat_Float32x2,
+        [3]f32 => c.WGPUVertexFormat_Float32x3,
+        [4]f32 => c.WGPUVertexFormat_Float32x4,
+        u32 => if (normalized) c.WGPUVertexFormat_Unorm32 else c.WGPUVertexFormat_Uint32,
+        [2]u32 => if (normalized) c.WGPUVertexFormat_Unorm32x2 else c.WGPUVertexFormat_Uint32x2,
+        [3]u32 => if (normalized) c.WGPUVertexFormat_Unorm32x3 else c.WGPUVertexFormat_Uint32x3,
+        [4]u32 => if (normalized) c.WGPUVertexFormat_Unorm32x4 else c.WGPUVertexFormat_Uint32x4,
+        i32 => if (normalized) c.WGPUVertexFormat_Snorm32 else c.WGPUVertexFormat_Sint32,
+        [2]i32 => if (normalized) c.WGPUVertexFormat_Snorm32x2 else c.WGPUVertexFormat_Sint32x2,
+        [3]i32 => if (normalized) c.WGPUVertexFormat_Snorm32x3 else c.WGPUVertexFormat_Sint32x3,
+        [4]i32 => if (normalized) c.WGPUVertexFormat_Snorm32x4 else c.WGPUVertexFormat_Sint32x4,
+        else => @compileError("unsupported vertex format type: " ++ @tagName(T)),
+    };
+}
+
+/// Produces a type with the same field names as T, allowing one to specify
+/// AttributeOptions for each of the fields.
+pub fn TypeAttributeOptions(comptime T: type) type {
+    const field_names = std.meta.fieldNames(T);
+
+    var fields: [field_names.len]std.builtin.Type.StructField = undefined;
+    for (field_names, &fields) |field_name, *field| {
+        field.* = .{
+            .name = field_name,
+            .type = AttributeOptions,
+            .default_value = &AttributeOptions{},
+            .is_comptime = true,
+            .alignment = @alignOf(AttributeOptions),
+        };
+    }
+
+    return @Type(.{
+        .Struct = .{
+            .layout = .auto,
+            .fields = &fields,
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
+}
+
+pub const AttributeOptions = struct {
+    normalized: bool = false,
+};
+
+/// Constructs an array of WGPUVertexAttribute from a type.
+pub fn vertexAttributesFromType(
+    comptime T: type,
+    comptime type_attribute_options: TypeAttributeOptions(T),
+) [std.meta.fields(T).len]c.WGPUVertexAttribute {
+    const fields = std.meta.fields(T);
+
+    var result: [fields.len]c.WGPUVertexAttribute = undefined;
+    inline for (fields, 0..) |field, i| {
+        const attribute_options = @field(type_attribute_options, field.name);
+        result[i] = .{
+            .format = vertexFormatFromType(field.type, attribute_options.normalized),
+            .offset = @offsetOf(T, field.name),
+            .shaderLocation = @intCast(i),
+        };
+    }
+
+    return result;
+}
+
 pub fn surfaceGetNextTextureView(
     surface: c.WGPUSurface,
     format: c.WGPUTextureFormat,

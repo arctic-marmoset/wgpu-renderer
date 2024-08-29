@@ -129,6 +129,12 @@ pub fn build(b: *std.Build) !void {
         b.installArtifact(wgpu.artifact("wgpu_native"));
     }
 
+    b.installDirectory(.{
+        .source_dir = b.path("data"),
+        .install_dir = .prefix,
+        .install_subdir = "data",
+    });
+
     if (install_docs) {
         b.installDirectory(.{
             .source_dir = exe.getEmittedDocs(),
