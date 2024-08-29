@@ -10,6 +10,8 @@ const wgpu = @import("wgpu.zig");
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.assert(gpa.deinit() == .ok);
+    var data_dir = try openDataDir(gpa.allocator());
+    defer data_dir.close();
 
     const instance = try wgpu.createInstance(.{});
     defer c.wgpuInstanceRelease(instance);
@@ -49,7 +51,7 @@ pub fn main() !void {
         ),
     });
 
-    std.sort.pdq(c.WGPUFeatureName, adapter_features, {}, std.sort.asc(c.WGPUFeatureName));
+    std.mem.sortUnstable(c.WGPUFeatureName, adapter_features, {}, std.sort.asc(c.WGPUFeatureName));
     const required_features = [_]c.WGPUFeatureName{
         c.WGPUFeatureName_TextureCompressionBC,
     };
@@ -117,7 +119,7 @@ pub fn main() !void {
 
     const surface_formats = mem.sliceFromParts(surface_capabilities.formats, surface_capabilities.formatCount);
     if (surface_formats.len == 0) return error.NoSurfaceFormatsAvailable;
-    std.sort.pdq(c.WGPUTextureFormat, surface_formats, {}, std.sort.asc(c.WGPUTextureFormat));
+    std.mem.sortUnstable(c.WGPUTextureFormat, surface_formats, {}, std.sort.asc(c.WGPUTextureFormat));
     std.log.debug("surface formats: [{s}]", .{
         fmt.fmtSliceElementFormatter(
             c.WGPUTextureFormat,
@@ -128,7 +130,7 @@ pub fn main() !void {
 
     const present_modes = mem.sliceFromParts(surface_capabilities.presentModes, surface_capabilities.presentModeCount);
     if (present_modes.len == 0) return error.NoPresentModesAvailable;
-    std.sort.pdq(c.WGPUPresentMode, present_modes, {}, std.sort.asc(c.WGPUPresentMode));
+    std.mem.sortUnstable(c.WGPUPresentMode, present_modes, {}, std.sort.asc(c.WGPUPresentMode));
     std.log.debug("present modes: [{s}]", .{
         fmt.fmtSliceElementFormatter(
             c.WGPUPresentMode,
@@ -178,6 +180,100 @@ pub fn main() !void {
     });
     defer c.wgpuSurfaceUnconfigure(surface);
 
+    const vs_module = try wgpu.deviceCreateShaderModuleSPIRV(
+        device,
+        gpa.allocator(),
+        data_dir,
+        "shaders/triangle.vs.spv",
+    );
+    defer c.wgpuShaderModuleRelease(vs_module);
+
+    const fs_module = try wgpu.deviceCreateShaderModuleSPIRV(
+        device,
+        gpa.allocator(),
+        data_dir,
+        "shaders/triangle.fs.spv",
+    );
+    defer c.wgpuShaderModuleRelease(fs_module);
+
+    const Vertex = struct { position: c.vec3, color: c.vec3 };
+    const vertex_attributes: []const c.WGPUVertexAttribute = &.{
+        .{
+            .format = c.WGPUVertexFormat_Float32x3,
+            .offset = @offsetOf(Vertex, "position"),
+            .shaderLocation = 0,
+        },
+        .{
+            .format = c.WGPUVertexFormat_Float32x3,
+            .offset = @offsetOf(Vertex, "color"),
+            .shaderLocation = 1,
+        },
+    };
+
+    const pipeline = c.wgpuDeviceCreateRenderPipeline(device, &.{
+        .layout = null,
+        .vertex = .{
+            .module = vs_module,
+            .entryPoint = "main",
+            .bufferCount = 1,
+            .buffers = &.{
+                .arrayStride = @sizeOf(Vertex),
+                .stepMode = c.WGPUVertexStepMode_Vertex,
+                .attributeCount = @intCast(vertex_attributes.len),
+                .attributes = vertex_attributes.ptr,
+            },
+        },
+        .primitive = .{
+            .topology = c.WGPUPrimitiveTopology_TriangleList,
+            .frontFace = c.WGPUFrontFace_CCW,
+            .cullMode = c.WGPUCullMode_Back,
+        },
+        .depthStencil = null,
+        .multisample = .{
+            .count = 1,
+            .mask = ~@as(u32, 0),
+            .alphaToCoverageEnabled = @intFromBool(false),
+        },
+        .fragment = &.{
+            .module = fs_module,
+            .entryPoint = "main",
+            .targetCount = 1,
+            .targets = &.{
+                .format = surface_format,
+                .blend = &.{
+                    .color = .{
+                        .operation = c.WGPUBlendOperation_Add,
+                        .srcFactor = c.WGPUBlendFactor_SrcAlpha,
+                        .dstFactor = c.WGPUBlendFactor_OneMinusSrcAlpha,
+                    },
+                    .alpha = .{
+                        .operation = c.WGPUBlendOperation_Add,
+                        .srcFactor = c.WGPUBlendFactor_Zero,
+                        .dstFactor = c.WGPUBlendFactor_One,
+                    },
+                },
+                .writeMask = c.WGPUColorWriteMask_All,
+            },
+        },
+    });
+    defer c.wgpuRenderPipelineRelease(pipeline);
+
+    // zig fmt: off
+    const vertices: []const Vertex = &.{
+        .{ .position = .{ -0.5, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+        .{ .position = .{  0.5, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 } },
+        .{ .position = .{  0.0,  0.5, 0.0 }, .color = .{ 0.0, 0.0, 1.0 } },
+    };
+    // zig fmt: on
+    const vbo = c.wgpuDeviceCreateBuffer(device, &.{
+        .label = "Vertex Buffer: Triangle",
+        .usage = c.WGPUBufferUsage_Vertex | c.WGPUBufferUsage_CopyDst,
+        .size = mem.sizeOfElements(vertices),
+    });
+    defer c.wgpuBufferRelease(vbo);
+    defer c.wgpuBufferDestroy(vbo);
+    c.wgpuQueueWriteBuffer(queue, vbo, 0, vertices.ptr, mem.sizeOfElements(vertices));
+
     while (c.glfwWindowShouldClose(window) != c.GLFW_TRUE) {
         c.glfwPollEvents();
 
@@ -200,6 +296,9 @@ pub fn main() !void {
             },
         });
         defer c.wgpuRenderPassEncoderRelease(render_pass);
+        c.wgpuRenderPassEncoderSetPipeline(render_pass, pipeline);
+        c.wgpuRenderPassEncoderSetVertexBuffer(render_pass, 0, vbo, 0, mem.sizeOfElements(vertices));
+        c.wgpuRenderPassEncoderDraw(render_pass, @intCast(vertices.len), 1, 0, 0);
         c.wgpuRenderPassEncoderEnd(render_pass);
 
         const command_buffer = c.wgpuCommandEncoderFinish(encoder, &.{});
@@ -209,6 +308,14 @@ pub fn main() !void {
         c.wgpuSurfacePresent(surface);
         _ = c.wgpuDevicePoll(device, @intFromBool(false), null);
     }
+}
+
+fn openDataDir(allocator: std.mem.Allocator) !std.fs.Dir {
+    const exe_dir_path = try std.fs.selfExeDirPathAlloc(allocator);
+    defer allocator.free(exe_dir_path);
+    const data_dir_path = try std.fs.path.join(allocator, &.{ exe_dir_path, "..", "data" });
+    defer allocator.free(data_dir_path);
+    return std.fs.openDirAbsolute(data_dir_path, .{});
 }
 
 fn onDeviceLost(

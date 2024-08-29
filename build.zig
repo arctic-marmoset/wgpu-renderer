@@ -100,6 +100,17 @@ pub fn build(b: *std.Build) !void {
         },
     }
 
+    _ = buildShaders(b, .{
+        .step_name = "shaders",
+        .description = "Compile shaders to SPIR-V bytecode",
+        .optimize = optimize,
+        .out_dir_path = "data/shaders",
+        .sources = &.{
+            "shaders/src/triangle.vs.hlsl",
+            "shaders/src/triangle.fs.hlsl",
+        },
+    });
+
     const unit_tests = b.addTest(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
