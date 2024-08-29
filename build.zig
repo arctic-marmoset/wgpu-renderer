@@ -103,8 +103,8 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
         .out_dir_path = "data/shaders",
         .sources = &.{
-            "shaders/src/triangle.vert",
-            "shaders/src/triangle.frag",
+            "shaders/src/basic.vert",
+            "shaders/src/basic.frag",
         },
     });
 

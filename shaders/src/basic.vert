@@ -1,9 +1,9 @@
 #version 460 core
 
 layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inColor;
+layout(location = 1) in vec2 inUV;
 
-layout(location = 0) out vec3 outColor;
+layout(location = 0) out vec2 outUV;
 
 layout(std140, set = 0, binding = 0) uniform Ubo
 {
@@ -21,5 +21,5 @@ void main() {
     const vec4 viewPosition = ubo.view * worldPosition;
     const vec4 clipPosition = ubo.proj * viewPosition;
     gl_Position = clipPosition;
-    outColor = inColor;
+    outUV = inUV;
 }

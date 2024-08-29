@@ -187,7 +187,7 @@ pub fn main() !void {
         view: c.mat4 align(32),
         proj: c.mat4 align(32),
     };
-    const bind_group_layout = c.wgpuDeviceCreateBindGroupLayout(device, &.{
+    const mvp_bind_group_layout = c.wgpuDeviceCreateBindGroupLayout(device, &.{
         .entryCount = 1,
         .entries = &.{
             .binding = 0,
@@ -199,11 +199,38 @@ pub fn main() !void {
             },
         },
     });
-    defer c.wgpuBindGroupLayoutRelease(bind_group_layout);
+    defer c.wgpuBindGroupLayoutRelease(mvp_bind_group_layout);
+    const texture_bind_group_layout_entries: []const c.WGPUBindGroupLayoutEntry = &.{
+        .{
+            .binding = 0,
+            .visibility = c.WGPUShaderStage_Fragment,
+            .sampler = .{
+                .type = c.WGPUSamplerBindingType_Filtering,
+            },
+        },
+        .{
+            .binding = 1,
+            .visibility = c.WGPUShaderStage_Fragment,
+            .texture = .{
+                .sampleType = c.WGPUTextureSampleType_Float,
+                .viewDimension = c.WGPUTextureViewDimension_2D,
+                .multisampled = @intFromBool(false),
+            },
+        },
+    };
+    const texture_bind_group_layout = c.wgpuDeviceCreateBindGroupLayout(device, &.{
+        .entryCount = @intCast(texture_bind_group_layout_entries.len),
+        .entries = texture_bind_group_layout_entries.ptr,
+    });
+    defer c.wgpuBindGroupLayoutRelease(texture_bind_group_layout);
 
+    const bind_group_layouts: []const c.WGPUBindGroupLayout = &.{
+        mvp_bind_group_layout,
+        texture_bind_group_layout,
+    };
     const pipeline_layout = c.wgpuDeviceCreatePipelineLayout(device, &.{
-        .bindGroupLayoutCount = 1,
-        .bindGroupLayouts = &bind_group_layout,
+        .bindGroupLayoutCount = @intCast(bind_group_layouts.len),
+        .bindGroupLayouts = bind_group_layouts.ptr,
     });
     defer c.wgpuPipelineLayoutRelease(pipeline_layout);
 
@@ -211,7 +238,7 @@ pub fn main() !void {
         device,
         gpa.allocator(),
         data_dir,
-        "shaders/triangle.vert.spv",
+        "shaders/basic.vert.spv",
     );
     defer c.wgpuShaderModuleRelease(vs_module);
 
@@ -219,11 +246,11 @@ pub fn main() !void {
         device,
         gpa.allocator(),
         data_dir,
-        "shaders/triangle.frag.spv",
+        "shaders/basic.frag.spv",
     );
     defer c.wgpuShaderModuleRelease(fs_module);
 
-    const Vertex = struct { position: c.vec3, color: c.vec3 };
+    const Vertex = struct { position: c.vec3, uv: c.vec2 };
     const vertex_attributes = wgpu.vertexAttributesFromType(Vertex, .{});
 
     const depth_format = c.WGPUTextureFormat_Depth32Float;
@@ -324,6 +351,50 @@ pub fn main() !void {
     });
     defer c.wgpuTextureViewRelease(depth_texture_view);
 
+    const model_texture_data = try data_dir.readFileAlloc(
+        gpa.allocator(),
+        "textures/missing.ktx2",
+        512 * 1024 * 1024,
+    );
+    defer gpa.allocator().free(model_texture_data);
+    var model_ktx_texture: ?*c.ktxTexture2 = null;
+    if (c.ktxTexture2_CreateFromMemory(
+        model_texture_data.ptr,
+        @intCast(model_texture_data.len),
+        c.KTX_TEXTURE_CREATE_NO_FLAGS,
+        &model_ktx_texture,
+    ) != c.KTX_SUCCESS) {
+        return error.CreateKtxTextureFailed;
+    }
+    const model_texture, const model_texture_format = try wgpu.deviceLoadTexture(
+        device,
+        queue,
+        model_ktx_texture.?,
+    );
+    const model_texture_view = c.wgpuTextureCreateView(model_texture, &.{
+        .format = model_texture_format,
+        .dimension = c.WGPUTextureViewDimension_2D,
+        .baseMipLevel = 0,
+        .mipLevelCount = model_ktx_texture.?.numLevels,
+        .baseArrayLayer = 0,
+        .arrayLayerCount = model_ktx_texture.?.numLayers,
+        .aspect = c.WGPUTextureAspect_All,
+    });
+    defer c.wgpuTextureViewRelease(model_texture_view);
+
+    const linear_sampler = c.wgpuDeviceCreateSampler(device, &.{
+        .addressModeU = c.WGPUAddressMode_Repeat,
+        .addressModeV = c.WGPUAddressMode_Repeat,
+        .addressModeW = c.WGPUAddressMode_Repeat,
+        .magFilter = c.WGPUFilterMode_Linear,
+        .minFilter = c.WGPUFilterMode_Linear,
+        .mipmapFilter = c.WGPUMipmapFilterMode_Linear,
+        .lodMinClamp = 0,
+        .lodMaxClamp = std.math.floatMax(f32),
+        .maxAnisotropy = 16.0,
+    });
+    defer c.wgpuSamplerRelease(linear_sampler);
+
     var mat4_identity: c.mat4 align(32) = undefined;
     c.glm_mat4_identity(&mat4_identity);
     var camera_position: c.vec3 = .{ 0.0, 0.0, -5.0 };
@@ -342,8 +413,8 @@ pub fn main() !void {
     defer c.wgpuBufferRelease(uniform_buffer);
     defer c.wgpuBufferDestroy(uniform_buffer);
     c.wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniform, @sizeOf(Uniform));
-    const bind_group = c.wgpuDeviceCreateBindGroup(device, &.{
-        .layout = bind_group_layout,
+    const mvp_bind_group = c.wgpuDeviceCreateBindGroup(device, &.{
+        .layout = mvp_bind_group_layout,
         .entryCount = 1,
         .entries = &.{
             .binding = 0,
@@ -352,7 +423,23 @@ pub fn main() !void {
             .size = @sizeOf(Uniform),
         },
     });
-    defer c.wgpuBindGroupRelease(bind_group);
+    defer c.wgpuBindGroupRelease(mvp_bind_group);
+    const texture_bind_group_entries: []const c.WGPUBindGroupEntry = &.{
+        .{
+            .binding = 0,
+            .sampler = linear_sampler,
+        },
+        .{
+            .binding = 1,
+            .textureView = model_texture_view,
+        },
+    };
+    const texture_bind_group = c.wgpuDeviceCreateBindGroup(device, &.{
+        .layout = texture_bind_group_layout,
+        .entryCount = @intCast(texture_bind_group_entries.len),
+        .entries = texture_bind_group_entries.ptr,
+    });
+    defer c.wgpuBindGroupRelease(texture_bind_group);
 
     // TODO: Maybe factor this out into a separate function.
     const model_data = try data_dir.readFileAllocOptions(
@@ -395,37 +482,26 @@ pub fn main() !void {
     var index_cursor: usize = 0;
     for (gltf_mesh.primitives.items) |primitive| {
         var position_accessor: Gltf.Accessor = undefined;
-        var color_accessor: Gltf.Accessor = undefined;
+        var uv_accessor: Gltf.Accessor = undefined;
         for (primitive.attributes.items) |attribute| {
             switch (attribute) {
                 .position => |index| {
                     position_accessor = gltf_model.data.accessors.items[index];
                 },
-                // NOTE: This actually isn't populated by zgltf. I'm using a
-                // modified version as a temporary solution. I haven't pushed it
-                // because I won't be using vertex colours later anyway.
-                .color => |index| {
-                    color_accessor = gltf_model.data.accessors.items[index];
+                .texcoord => |index| {
+                    uv_accessor = gltf_model.data.accessors.items[index];
                 },
                 else => {},
             }
         }
 
         var position_iter = position_accessor.iterator(f32, &gltf_model, gltf_model.glb_binary.?);
-        var color_iter = color_accessor.iterator(u16, &gltf_model, gltf_model.glb_binary.?);
+        var uv_iter = uv_accessor.iterator(f32, &gltf_model, gltf_model.glb_binary.?);
         while (position_iter.next()) |position| : (vertex_cursor += 1) {
-            const color = color_iter.next().?[0..][0..3];
-            const r: f32 = @floatFromInt(color[0]);
-            const g: f32 = @floatFromInt(color[1]);
-            const b: f32 = @floatFromInt(color[2]);
-            const range: f32 = @floatFromInt(std.math.maxInt(u16));
+            const uv = uv_iter.next().?;
             vertices[vertex_cursor] = .{
                 .position = position[0..][0..3].*,
-                .color = .{
-                    r / range,
-                    g / range,
-                    b / range,
-                },
+                .uv = uv[0..][0..2].*,
             };
         }
 
@@ -487,7 +563,8 @@ pub fn main() !void {
         });
         defer c.wgpuRenderPassEncoderRelease(render_pass);
         c.wgpuRenderPassEncoderSetPipeline(render_pass, pipeline);
-        c.wgpuRenderPassEncoderSetBindGroup(render_pass, 0, bind_group, 0, null);
+        c.wgpuRenderPassEncoderSetBindGroup(render_pass, 0, mvp_bind_group, 0, null);
+        c.wgpuRenderPassEncoderSetBindGroup(render_pass, 1, texture_bind_group, 0, null);
         c.wgpuRenderPassEncoderSetVertexBuffer(render_pass, 0, vbo, 0, mem.sizeOfElements(vertices));
         c.wgpuRenderPassEncoderSetIndexBuffer(render_pass, ibo, c.WGPUIndexFormat_Uint32, 0, mem.sizeOfElements(indices));
         c.wgpuRenderPassEncoderDrawIndexed(render_pass, @intCast(indices.len), 1, 0, 0, 0);

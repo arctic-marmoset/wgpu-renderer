@@ -130,7 +130,7 @@ pub fn deviceLoadTexture(
     device: c.WGPUDevice,
     queue: c.WGPUQueue,
     ktx_texture: *c.ktxTexture2,
-) !c.WGPUTexture {
+) !struct { c.WGPUTexture, c.WGPUTextureFormat } {
     const format = switch (ktx_texture.vkFormat) {
         c.VK_FORMAT_BC7_SRGB_BLOCK => c.WGPUTextureFormat_BC7RGBAUnormSrgb,
         else => return error.UnsupportedFormat,
@@ -176,7 +176,7 @@ pub fn deviceLoadTexture(
         return error.LoadTextureFailed;
     }
 
-    return texture;
+    return .{ texture, format };
 }
 
 pub fn deviceCreateShaderModuleSPIRV(
