@@ -253,7 +253,10 @@ pub fn main() !void {
     const Vertex = struct { position: c.vec3, uv: c.vec2 };
     const vertex_attributes = wgpu.vertexAttributesFromType(Vertex, .{});
 
-    const depth_format = c.WGPUTextureFormat_Depth32Float;
+    // Must declare type otherwise compilation fails on macOS with:
+    //      error: expected type '[*c]const c_uint', found '*const c_int'
+    //          .viewFormats = &depth_format,
+    const depth_format: c.WGPUTextureFormat = c.WGPUTextureFormat_Depth32Float;
 
     const pipeline = c.wgpuDeviceCreateRenderPipeline(device, &.{
         .layout = pipeline_layout,
@@ -396,7 +399,7 @@ pub fn main() !void {
     defer c.wgpuSamplerRelease(linear_sampler);
 
     var mat4_identity: c.mat4 align(32) = undefined;
-    c.glm_mat4_identity(&mat4_identity);
+    c.glmc_mat4_identity(&mat4_identity);
     var camera_position: c.vec3 = .{ 0.0, 0.0, -5.0 };
     var camera_target: c.vec3 = .{ 0.0, 0.0, 1.0 };
     var camera_up: c.vec3 = .{ 0.0, 1.0, 0.0 };
@@ -600,7 +603,7 @@ fn perspectiveInverseDepth(
     const a = 0.0;
     const b = near;
 
-    c.glm_mat4_zero(destination);
+    c.glmc_mat4_zero(destination);
     destination[0][0] = x;
     destination[1][1] = y;
     destination[2][2] = a;
