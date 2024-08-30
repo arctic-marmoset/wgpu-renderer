@@ -7,6 +7,7 @@ const glfw = @import("glfw.zig");
 const mem = @import("mem.zig");
 const wgpu = @import("wgpu.zig");
 
+const Camera = @import("Camera.zig");
 const Gltf = @import("Gltf");
 
 pub fn main() !void {
@@ -18,6 +19,7 @@ pub fn main() !void {
     const instance = try wgpu.createInstance(.{});
     defer c.wgpuInstanceRelease(instance);
 
+    // TODO: Create surface before adapter so we can request an adapter that is compatible.
     const adapter = try wgpu.instanceRequestAdapter(instance, .{});
     defer c.wgpuAdapterRelease(adapter);
 
@@ -155,9 +157,9 @@ pub fn main() !void {
     ) orelse return error.DesiredSurfaceFormatNotAvailable;
     std.log.debug("selected surface format: {s}", .{wgpu.textureFormatToString(surface_format)});
 
-    // Don't include FIFO because we'll fall back to it anyway if none
-    // of the desired modes are available; FIFO is guaranteed by the WebGPU spec
-    // to be available.
+    // Don't include FIFO because we'll fall back to it anyway if none of the
+    // desired modes are available; FIFO is guaranteed by the WebGPU spec to be
+    // available.
     const desired_present_modes: []const c.WGPUPresentMode = &.{
         c.WGPUPresentMode_Mailbox,
         c.WGPUPresentMode_Immediate,
@@ -398,16 +400,14 @@ pub fn main() !void {
     });
     defer c.wgpuSamplerRelease(linear_sampler);
 
+    var camera = Camera.init(.{ 0.0, 0.0, -5.0 }, .{ 0.0, 0.0, 1.0 });
+    var uniform: Uniform = undefined;
     var mat4_identity: c.mat4 align(32) = undefined;
     c.glmc_mat4_identity(&mat4_identity);
-    var camera_position: c.vec3 = .{ 0.0, 0.0, -5.0 };
-    var camera_target: c.vec3 = .{ 0.0, 0.0, 1.0 };
-    var camera_up: c.vec3 = .{ 0.0, 1.0, 0.0 };
+    uniform.model = mat4_identity;
     const aspect_ratio =
         @as(f32, @floatFromInt(framebuffer_size.width)) / @as(f32, @floatFromInt(framebuffer_size.height));
-    var uniform: Uniform = undefined;
-    uniform.model = mat4_identity;
-    c.glm_lookat(&camera_position, &camera_target, &camera_up, &uniform.view);
+    c.glmc_mat4_copy(&camera.view, &uniform.view);
     perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01, &uniform.proj);
     const uniform_buffer = c.wgpuDeviceCreateBuffer(device, &.{
         .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
@@ -497,6 +497,9 @@ pub fn main() !void {
                 else => {},
             }
         }
+
+        std.debug.assert(position_accessor.component_type == .float);
+        std.debug.assert(uv_accessor.component_type == .float);
 
         var position_iter = position_accessor.iterator(f32, &gltf_model, gltf_model.glb_binary.?);
         var uv_iter = uv_accessor.iterator(f32, &gltf_model, gltf_model.glb_binary.?);
