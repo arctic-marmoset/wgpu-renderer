@@ -42,6 +42,9 @@ index_count: usize,
 
 camera: Camera,
 
+mouse_captured: bool,
+last_mouse_position: c.vec2,
+
 const Uniform = extern struct {
     model: c.mat4 align(32),
     view: c.mat4 align(32),
@@ -75,6 +78,20 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         null,
     ) orelse return error.CreateMainWindowFailed;
     errdefer c.glfwDestroyWindow(window);
+    c.glfwSetWindowUserPointer(window, engine);
+    _ = c.glfwSetKeyCallback(window, keyActionCallback);
+    _ = c.glfwSetMouseButtonCallback(window, mouseButtonActionCallback);
+    _ = c.glfwSetCursorPosCallback(window, mousePositionChangedCallback);
+    c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
+    if (c.glfwRawMouseMotionSupported() == c.GLFW_TRUE) {
+        c.glfwSetInputMode(window, c.GLFW_RAW_MOUSE_MOTION, c.GLFW_TRUE);
+    }
+    const mouse_position: c.vec2 = blk: {
+        var x: f64 = undefined;
+        var y: f64 = undefined;
+        c.glfwGetCursorPos(window, &x, &y);
+        break :blk .{ @floatCast(x), @floatCast(y) };
+    };
 
     const instance = try wgpu.createInstance(.{});
     errdefer c.wgpuInstanceRelease(instance);
@@ -607,6 +624,9 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .index_count = index_count,
 
         .camera = camera,
+
+        .mouse_captured = true,
+        .last_mouse_position = mouse_position,
     };
 
     return engine;
@@ -706,6 +726,71 @@ fn update(self: *Engine) void {
     c.glmc_rotate_y(&mut_mat4_identity, std.math.degreesToRadians(45.0), &self.uniform.model);
     c.glmc_rotate_z(&self.uniform.model, time, &self.uniform.model);
     c.wgpuQueueWriteBuffer(self.queue, self.uniform_buffer, 0, &self.uniform, @sizeOf(Uniform));
+}
+
+fn onKeyAction(self: *Engine, key: c_int, scancode: c_int, action: c_int, modifiers: c_int) void {
+    _ = scancode; // autofix
+    _ = action; // autofix
+    _ = modifiers; // autofix
+    // TODO: This should probably be in `Engine.update`.
+    if (key == c.GLFW_KEY_ESCAPE) {
+        if (self.mouse_captured) {
+            self.mouse_captured = false;
+            c.glfwSetInputMode(self.window, c.GLFW_CURSOR, c.GLFW_CURSOR_NORMAL);
+        }
+    }
+}
+
+fn onMouseButtonAction(self: *Engine, button: c_int, action: c_int, modifiers: c_int) void {
+    _ = button; // autofix
+    _ = action; // autofix
+    _ = modifiers; // autofix
+    // TODO: This should probably be in `Engine.update`.
+    if (!self.mouse_captured) {
+        self.mouse_captured = true;
+        c.glfwSetInputMode(self.window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
+    }
+}
+
+fn onMousePositionChanged(self: *Engine, x: f64, y: f64) void {
+    if (!self.mouse_captured) return;
+    var position: c.vec2 = .{ @floatCast(x), @floatCast(y) };
+    var delta: c.vec2 = undefined;
+    c.glm_vec2_sub(&position, &self.last_mouse_position, &delta);
+    self.last_mouse_position = position;
+    // TODO: This should be in `Engine.update`.
+    self.camera.updateOrientation(delta);
+    c.glmc_mat4_copy(&self.camera.view, &self.uniform.view);
+}
+
+fn keyActionCallback(
+    window: ?*c.GLFWwindow,
+    key: c_int,
+    scancode: c_int,
+    action: c_int,
+    modifiers: c_int,
+) callconv(.C) void {
+    const engine: *Engine = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window)));
+    engine.onKeyAction(key, scancode, action, modifiers);
+}
+
+fn mouseButtonActionCallback(
+    window: ?*c.GLFWwindow,
+    button: c_int,
+    action: c_int,
+    modifiers: c_int,
+) callconv(.C) void {
+    const engine: *Engine = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window)));
+    engine.onMouseButtonAction(button, action, modifiers);
+}
+
+fn mousePositionChangedCallback(
+    window: ?*c.GLFWwindow,
+    x: f64,
+    y: f64,
+) callconv(.C) void {
+    const engine: *Engine = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window)));
+    engine.onMousePositionChanged(x, y);
 }
 
 fn onDeviceLost(

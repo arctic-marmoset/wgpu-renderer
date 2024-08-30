@@ -45,7 +45,7 @@ fn onRequestAdapterEnded(
     message: ?[*:0]const u8,
     user_data: ?*anyopaque,
 ) callconv(.C) void {
-    const result: ?*AdapterOrError = @alignCast(@ptrCast(user_data));
+    const result: ?*AdapterOrError = @ptrCast(@alignCast(user_data));
     result.?.* = error.RequestAdapterFailed;
 
     if (status == c.WGPURequestAdapterStatus_Success) {
@@ -99,7 +99,7 @@ fn onRequestDeviceEnded(
     message: ?[*:0]const u8,
     user_data: ?*anyopaque,
 ) callconv(.C) void {
-    const result: ?*DeviceOrError = @alignCast(@ptrCast(user_data));
+    const result: ?*DeviceOrError = @ptrCast(@alignCast(user_data));
     result.?.* = error.RequestDeviceFailed;
 
     if (status == c.WGPURequestDeviceStatus_Success) {
@@ -358,7 +358,7 @@ fn loadTextureCompressed(
     user_data: ?*anyopaque,
 ) callconv(.C) c.KTX_error_code {
     _ = face_index;
-    const data: *LoadTextureCallbackData = @alignCast(@ptrCast(user_data.?));
+    const data: *LoadTextureCallbackData = @ptrCast(@alignCast(user_data.?));
 
     const width: u32 = @intCast(c_width);
     const height: u32 = @intCast(c_height);
