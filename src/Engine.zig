@@ -423,7 +423,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     // TODO: Do tonemapping so HDR textures look ok with SDR display.
     const model_texture_data = try data_dir.readFileAlloc(
         allocator,
-        "textures/hdr.ktx2",
+        "textures/stanford_dragon_base_bc7.ktx2",
         512 * 1024 * 1024,
     );
     defer allocator.free(model_texture_data);
@@ -467,9 +467,30 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
 
     var camera = Camera.init(.{ 0.0, 0.0, -5.0 }, math.world_forward);
     var uniform: Uniform = undefined;
-    var mat4_identity: c.mat4 align(32) = undefined;
-    c.glmc_mat4_identity(&mat4_identity);
-    uniform.model = mat4_identity;
+    // This model matrix converts from the glTF coordinate system to our world
+    // space convention. It *must* be applied to all objects. The contents of
+    // the matrix are defined as follows:
+    // [ -1,  0, 0, 0 ] The glTF +X direction corresponds to our -X direction.
+    // [  0, -1, 0, 0 ] The glTF +Y direction corresponds to our -Y direction.
+    // [  0,  0, 1, 0 ] The glTF +Z direction is the same as our +Z direction.
+    // [  0,  0, 0, 1 ]
+    // TODO: Figure out where to put this. Should we just init all model
+    // matrices like this? Or do we apply this in a post-processing step?
+    // TODO: Any way to compute these (at comptime), based on the glTF axes and
+    // our worldspace axes?
+    // zig fmt: off
+    uniform.model = .{
+        .{ -1.0,  0.0, 0.0, 0.0 },
+        .{  0.0, -1.0, 0.0, 0.0 },
+        .{  0.0,  0.0, 1.0, 0.0 },
+        .{  0.0,  0.0, 0.0, 1.0 },
+    };
+    // zig fmt: on
+    // The dragon is kind of small. Scale it up.
+    const scale = 10.0;
+    var isotropic_scale: c.vec3 = undefined;
+    c.glm_vec3_fill(&isotropic_scale, scale);
+    c.glmc_scale(&uniform.model, &isotropic_scale);
     const aspect_ratio =
         @as(f32, @floatFromInt(framebuffer_size.width)) / @as(f32, @floatFromInt(framebuffer_size.height));
     c.glmc_mat4_copy(&camera.view, &uniform.view);
@@ -512,8 +533,8 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     // TODO: Maybe factor this out into a separate function.
     const model_data = try data_dir.readFileAllocOptions(
         allocator,
-        "meshes/cube.glb",
-        4 * 1024,
+        "meshes/stanford_dragon.glb",
+        4 * 1024 * 1024,
         null,
         @alignOf(u32),
         null,
