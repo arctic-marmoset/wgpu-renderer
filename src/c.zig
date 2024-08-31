@@ -1,6 +1,5 @@
 pub usingnamespace @cImport({
     @cDefine("CGLM_FORCE_DEPTH_ZERO_TO_ONE", {});
-    @cDefine("CGLM_FORCE_LEFT_HANDED", {});
     @cInclude("cglm/call.h");
 
     @cInclude("GLFW/glfw3.h");

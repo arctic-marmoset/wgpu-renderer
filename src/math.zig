@@ -1,5 +1,10 @@
 const c = @import("c.zig");
 
+// glTF coordinate system.
+pub const world_up: c.vec3 = .{ 0.0, 1.0, 0.0 };
+pub const world_forward: c.vec3 = .{ 0.0, 0.0, 1.0 };
+pub const world_right: c.vec3 = .{ -1.0, 0.0, 0.0 };
+
 pub fn perspectiveInverseDepth(
     vfov: f32,
     aspect: f32,

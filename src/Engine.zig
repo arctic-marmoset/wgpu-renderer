@@ -460,7 +460,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     });
     defer c.wgpuSamplerRelease(linear_sampler);
 
-    var camera = Camera.init(.{ 0.0, 0.0, -5.0 }, .{ 0.0, 0.0, 1.0 });
+    var camera = Camera.init(.{ 0.0, 0.0, -5.0 }, math.world_forward);
     var uniform: Uniform = undefined;
     var mat4_identity: c.mat4 align(32) = undefined;
     c.glmc_mat4_identity(&mat4_identity);
@@ -722,6 +722,29 @@ fn update(self: *Engine) void {
     var mut_mat4_identity: c.mat4 align(32) = undefined;
     c.glmc_mat4_identity(&mut_mat4_identity);
 
+    var move_direction: Camera.MoveDirection = .{};
+    if (c.glfwGetKey(self.window, c.GLFW_KEY_W) == c.GLFW_PRESS) {
+        move_direction.forward = true;
+    }
+    if (c.glfwGetKey(self.window, c.GLFW_KEY_A) == c.GLFW_PRESS) {
+        move_direction.left = true;
+    }
+    if (c.glfwGetKey(self.window, c.GLFW_KEY_S) == c.GLFW_PRESS) {
+        move_direction.backward = true;
+    }
+    if (c.glfwGetKey(self.window, c.GLFW_KEY_D) == c.GLFW_PRESS) {
+        move_direction.right = true;
+    }
+    if (c.glfwGetKey(self.window, c.GLFW_KEY_SPACE) == c.GLFW_PRESS) {
+        move_direction.up = true;
+    }
+    if (c.glfwGetKey(self.window, c.GLFW_KEY_LEFT_SHIFT) == c.GLFW_PRESS) {
+        move_direction.down = true;
+    }
+    move_direction.normalize();
+    self.camera.translate(move_direction);
+    c.glmc_mat4_copy(&self.camera.view, &self.uniform.view);
+
     // NOTE: Must use the `call` interface because translate-c fails to translate `glm_mul_rot_sse2`.
     c.glmc_rotate_y(&mut_mat4_identity, std.math.degreesToRadians(45.0), &self.uniform.model);
     c.glmc_rotate_z(&self.uniform.model, time, &self.uniform.model);
@@ -760,7 +783,6 @@ fn onMousePositionChanged(self: *Engine, x: f64, y: f64) void {
     self.last_mouse_position = position;
     // TODO: This should be in `Engine.update`.
     self.camera.updateOrientation(delta);
-    c.glmc_mat4_copy(&self.camera.view, &self.uniform.view);
 }
 
 fn keyActionCallback(
