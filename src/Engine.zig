@@ -335,7 +335,11 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         },
         .primitive = .{
             .topology = c.WGPUPrimitiveTopology_TriangleList,
-            .frontFace = c.WGPUFrontFace_CCW,
+            // I want my models to be glTF format, which uses RH (-X right,
+            // +Y up) but WebGPU expects LH. Converting from RH to LH causes the
+            // axes to flip, which also flips the winding order from glTF's CCW
+            // to CW.
+            .frontFace = c.WGPUFrontFace_CW,
             .cullMode = c.WGPUCullMode_Back,
         },
         .depthStencil = &.{
@@ -416,9 +420,10 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     });
     errdefer c.wgpuTextureViewRelease(depth_texture_view);
 
+    // TODO: Do tonemapping so HDR textures look ok with SDR display.
     const model_texture_data = try data_dir.readFileAlloc(
         allocator,
-        "textures/missing.ktx2",
+        "textures/hdr.ktx2",
         512 * 1024 * 1024,
     );
     defer allocator.free(model_texture_data);
@@ -718,6 +723,7 @@ fn tick(self: *Engine) !void {
 fn update(self: *Engine) void {
     // TODO: This needs to become a delta time.
     const time: f32 = @floatCast(c.glfwGetTime());
+    _ = time; // autofix
 
     var mut_mat4_identity: c.mat4 align(32) = undefined;
     c.glmc_mat4_identity(&mut_mat4_identity);
@@ -745,9 +751,6 @@ fn update(self: *Engine) void {
     self.camera.translate(move_direction);
     c.glmc_mat4_copy(&self.camera.view, &self.uniform.view);
 
-    // NOTE: Must use the `call` interface because translate-c fails to translate `glm_mul_rot_sse2`.
-    c.glmc_rotate_y(&mut_mat4_identity, std.math.degreesToRadians(45.0), &self.uniform.model);
-    c.glmc_rotate_z(&self.uniform.model, time, &self.uniform.model);
     c.wgpuQueueWriteBuffer(self.queue, self.uniform_buffer, 0, &self.uniform, @sizeOf(Uniform));
 }
 

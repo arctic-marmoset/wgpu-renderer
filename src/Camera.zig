@@ -52,8 +52,8 @@ pub fn init(position: c.vec3, target: c.vec3) Camera {
 
 pub fn translate(self: *Camera, move_direction: MoveDirection) void {
     var mut_world_forward = math.world_forward;
-    // TODO: I don't know why I need to negate this, but not doing so causes
-    // forward/back, left/right to be flipped.
+    // TODO: I think we need to negate here because we assume a LH clip space,
+    // but I think all the glm_quat_* functions assume RH.
     c.glm_vec3_negate(&mut_world_forward);
     var forward: c.vec3 = undefined;
     c.glmc_quat_rotatev(&self.orientation, &mut_world_forward, &forward);

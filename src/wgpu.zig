@@ -132,15 +132,23 @@ pub fn deviceLoadTexture(
     ktx_texture: *c.ktxTexture2,
 ) !struct { c.WGPUTexture, c.WGPUTextureFormat } {
     const format = switch (ktx_texture.vkFormat) {
+        c.VK_FORMAT_BC6H_SFLOAT_BLOCK => c.WGPUTextureFormat_BC6HRGBFloat,
+        c.VK_FORMAT_BC6H_UFLOAT_BLOCK => c.WGPUTextureFormat_BC6HRGBUfloat,
         c.VK_FORMAT_BC7_SRGB_BLOCK => c.WGPUTextureFormat_BC7RGBAUnormSrgb,
         else => return error.UnsupportedFormat,
     };
     const block_size = switch (format) {
-        c.WGPUTextureFormat_BC7RGBAUnormSrgb => 16,
+        c.WGPUTextureFormat_BC6HRGBFloat,
+        c.WGPUTextureFormat_BC6HRGBUfloat,
+        c.WGPUTextureFormat_BC7RGBAUnormSrgb,
+        => 16,
         else => unreachable,
     };
     const block_width = switch (format) {
-        c.WGPUTextureFormat_BC7RGBAUnormSrgb => 4,
+        c.WGPUTextureFormat_BC6HRGBFloat,
+        c.WGPUTextureFormat_BC6HRGBUfloat,
+        c.WGPUTextureFormat_BC7RGBAUnormSrgb,
+        => 4,
         else => unreachable,
     };
 
@@ -179,6 +187,7 @@ pub fn deviceLoadTexture(
     return .{ texture, format };
 }
 
+// TODO: Reading shader data isn't this function's responsibility.
 pub fn deviceCreateShaderModuleSPIRV(
     device: c.WGPUDevice,
     allocator: std.mem.Allocator,
