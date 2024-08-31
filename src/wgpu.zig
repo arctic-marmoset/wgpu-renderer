@@ -131,7 +131,8 @@ pub fn deviceLoadTexture(
     queue: c.WGPUQueue,
     ktx_texture: *c.ktxTexture2,
 ) !struct { c.WGPUTexture, c.WGPUTextureFormat } {
-    const format = switch (ktx_texture.vkFormat) {
+    // NOTE: Must declare type otherwise compilation fails on macOS.
+    const format: c.WGPUTextureFormat = switch (ktx_texture.vkFormat) {
         c.VK_FORMAT_BC6H_SFLOAT_BLOCK => c.WGPUTextureFormat_BC6HRGBFloat,
         c.VK_FORMAT_BC6H_UFLOAT_BLOCK => c.WGPUTextureFormat_BC6HRGBUfloat,
         c.VK_FORMAT_BC7_SRGB_BLOCK => c.WGPUTextureFormat_BC7RGBAUnormSrgb,
