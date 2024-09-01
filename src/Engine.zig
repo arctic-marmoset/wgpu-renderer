@@ -20,6 +20,7 @@ data_dir: std.fs.Dir,
 window: *c.GLFWwindow,
 surface: c.WGPUSurface,
 surface_format: c.WGPUTextureFormat,
+present_mode: c.WGPUPresentMode,
 
 instance: c.WGPUInstance,
 device: c.WGPUDevice,
@@ -29,6 +30,7 @@ pipeline: c.WGPURenderPipeline,
 mvp_bind_group: c.WGPUBindGroup,
 texture_bind_group: c.WGPUBindGroup,
 
+depth_format: c.WGPUTextureFormat,
 depth_texture: c.WGPUTexture,
 depth_texture_view: c.WGPUTextureView,
 
@@ -69,7 +71,6 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
 
     c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_NO_API);
     c.glfwWindowHint(c.GLFW_COCOA_RETINA_FRAMEBUFFER, c.GLFW_TRUE);
-    c.glfwWindowHint(c.GLFW_RESIZABLE, c.GLFW_FALSE);
     const window = c.glfwCreateWindow(
         1280,
         720,
@@ -82,6 +83,8 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     _ = c.glfwSetKeyCallback(window, keyActionCallback);
     _ = c.glfwSetMouseButtonCallback(window, mouseButtonActionCallback);
     _ = c.glfwSetCursorPosCallback(window, mousePositionChangedCallback);
+    _ = c.glfwSetFramebufferSizeCallback(window, framebufferSizeChangedCallback);
+    c.glfwSetWindowSizeLimits(window, 640, 360, c.GLFW_DONT_CARE, c.GLFW_DONT_CARE);
     c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
     if (c.glfwRawMouseMotionSupported() == c.GLFW_TRUE) {
         c.glfwSetInputMode(window, c.GLFW_RAW_MOUSE_MOTION, c.GLFW_TRUE);
@@ -629,6 +632,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .window = window,
         .surface = surface,
         .surface_format = surface_format,
+        .present_mode = present_mode,
 
         .instance = instance,
         .device = device,
@@ -638,6 +642,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .mvp_bind_group = mvp_bind_group,
         .texture_bind_group = texture_bind_group,
 
+        .depth_format = depth_format,
         .depth_texture = depth_texture,
         .depth_texture_view = depth_texture_view,
 
@@ -676,9 +681,9 @@ pub fn deinit(self: *Engine) void {
     c.wgpuRenderPipelineRelease(self.pipeline);
     c.wgpuQueueRelease(self.queue);
     c.wgpuDeviceRelease(self.device);
-    c.wgpuInstanceRelease(self.instance);
     c.wgpuSurfaceUnconfigure(self.surface);
     c.wgpuSurfaceRelease(self.surface);
+    c.wgpuInstanceRelease(self.instance);
     c.glfwDestroyWindow(self.window);
     self.data_dir.close();
 
@@ -687,8 +692,9 @@ pub fn deinit(self: *Engine) void {
 
 pub fn run(self: *Engine) !void {
     while (self.isRunning()) {
+        c.glfwPollEvents();
         self.update();
-        try self.tick();
+        try self.renderFrame();
     }
 }
 
@@ -696,9 +702,7 @@ fn isRunning(self: *Engine) bool {
     return c.glfwWindowShouldClose(self.window) != c.GLFW_TRUE;
 }
 
-fn tick(self: *Engine) !void {
-    c.glfwPollEvents();
-
+fn renderFrame(self: *Engine) !void {
     const view = wgpu.surfaceGetNextTextureView(
         self.surface,
         self.surface_format,
@@ -771,8 +775,61 @@ fn update(self: *Engine) void {
     move_direction.normalize();
     self.camera.translate(move_direction);
     c.glmc_mat4_copy(&self.camera.view, &self.uniform.view);
-
     c.wgpuQueueWriteBuffer(self.queue, self.uniform_buffer, 0, &self.uniform, @sizeOf(Uniform));
+}
+
+// TODO: Deduplicate surface + depth texture creation (here and in init).
+fn recreateSwapChain(self: *Engine, width: u32, height: u32) void {
+    c.wgpuTextureViewRelease(self.depth_texture_view);
+    c.wgpuTextureDestroy(self.depth_texture);
+    c.wgpuTextureRelease(self.depth_texture);
+
+    c.wgpuSurfaceConfigure(self.surface, &.{
+        .device = self.device,
+        .format = self.surface_format,
+        .usage = c.WGPUTextureUsage_RenderAttachment,
+        .alphaMode = c.WGPUCompositeAlphaMode_Auto,
+        .width = width,
+        .height = height,
+        .presentMode = self.present_mode,
+    });
+
+    const depth_texture = c.wgpuDeviceCreateTexture(self.device, &.{
+        .usage = c.WGPUTextureUsage_RenderAttachment,
+        .dimension = c.WGPUTextureDimension_2D,
+        .size = .{
+            .width = width,
+            .height = height,
+            .depthOrArrayLayers = 1,
+        },
+        .format = self.depth_format,
+        .mipLevelCount = 1,
+        .sampleCount = 1,
+        .viewFormatCount = 1,
+        .viewFormats = &self.depth_format,
+    });
+    errdefer c.wgpuTextureRelease(depth_texture);
+    errdefer c.wgpuTextureDestroy(depth_texture);
+    const depth_texture_view = c.wgpuTextureCreateView(depth_texture, &.{
+        .format = self.depth_format,
+        .dimension = c.WGPUTextureViewDimension_2D,
+        .baseMipLevel = 0,
+        .mipLevelCount = 1,
+        .baseArrayLayer = 0,
+        .arrayLayerCount = 1,
+        .aspect = c.WGPUTextureAspect_DepthOnly,
+    });
+    errdefer c.wgpuTextureViewRelease(depth_texture_view);
+
+    self.depth_texture = depth_texture;
+    self.depth_texture_view = depth_texture_view;
+}
+
+// TODO: Not sure I want to do the resizing in here.
+fn onFramebufferSizeChanged(self: *Engine, width: u32, height: u32) void {
+    self.recreateSwapChain(width, height);
+    const aspect_ratio = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
+    math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01, &self.uniform.proj);
 }
 
 fn onKeyAction(self: *Engine, key: c_int, scancode: c_int, action: c_int, modifiers: c_int) void {
@@ -807,6 +864,15 @@ fn onMousePositionChanged(self: *Engine, x: f64, y: f64) void {
     self.last_mouse_position = position;
     // TODO: This should be in `Engine.update`.
     self.camera.updateOrientation(delta);
+}
+
+fn framebufferSizeChangedCallback(
+    window: ?*c.GLFWwindow,
+    width: c_int,
+    height: c_int,
+) callconv(.C) void {
+    const engine: *Engine = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window)));
+    engine.onFramebufferSizeChanged(@intCast(width), @intCast(height));
 }
 
 fn keyActionCallback(
@@ -849,13 +915,13 @@ fn onDeviceLost(
     const format = "device lost: reason: {s}";
     const args = .{wgpu.deviceLostReasonToString(reason)};
 
-    if (builtin.mode == .Debug) {
-        std.debug.panic(format, args);
-    }
-
     std.log.err(format, args);
     if (maybe_message) |message| {
         std.log.err("{s}", .{message});
+    }
+
+    if (builtin.mode == .Debug) {
+        @breakpoint();
     }
 }
 
@@ -869,13 +935,13 @@ fn onUncapturedError(
     const format = "uncaptured device error: type: {s}";
     const args = .{wgpu.errorTypeToString(@"type")};
 
-    if (builtin.mode == .Debug) {
-        std.debug.panic(format, args);
-    }
-
     std.log.err(format, args);
     if (maybe_message) |message| {
         std.log.err("{s}", .{message});
+    }
+
+    if (builtin.mode == .Debug) {
+        @breakpoint();
     }
 }
 
