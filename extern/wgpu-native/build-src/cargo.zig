@@ -66,6 +66,51 @@ const BuildStep = struct {
         run_cargo.addArgs(&.{ "--target", rust_target_string });
         run_cargo.addArg("--target-dir");
         const output_path = run_cargo.addOutputDirectoryArg(options.name);
+        if (options.target.query.cpu_arch != null and
+            options.target.query.os_tag != null and
+            options.target.query.abi != null)
+        {
+            const linker_path = owner.pathJoin(&.{
+                owner.build_root.path.?,
+                "build-src",
+                "linker.py",
+            });
+
+            comptime var linker_wrapper_header: []const u8 = "#!/usr/bin/env sh";
+            comptime var linker_wrapper_name: []const u8 = "linker";
+            comptime var shell_args = "$@";
+            if (builtin.os.tag == .windows) {
+                linker_wrapper_header = "@echo off";
+                linker_wrapper_name = linker_wrapper_name ++ ".bat";
+                shell_args = "%*";
+            }
+
+            const write_linker_wrapper = owner.addWriteFiles();
+            const linker_wrapper = write_linker_wrapper.add(linker_wrapper_name, owner.fmt(
+                \\{s}
+                \\python3 {s} {s}-{s}-{s} {s}
+            , .{
+                linker_wrapper_header,
+                linker_path,
+                @tagName(options.target.result.cpu.arch),
+                @tagName(options.target.result.os.tag),
+                @tagName(options.target.result.abi),
+                shell_args,
+            }));
+            const copy_linker_wrapper = owner.addWriteFiles();
+            const executable_linker_wrapper = copy_linker_wrapper.addCopyFile(linker_wrapper, linker_wrapper_name);
+            if (builtin.os.tag != .windows) {
+                const chmod = owner.addSystemCommand(&.{ "chmod", "u+x" });
+                chmod.addFileArg(executable_linker_wrapper);
+                run_cargo.step.dependOn(&chmod.step);
+            }
+            run_cargo.setCwd(executable_linker_wrapper.dirname());
+            run_cargo.addArgs(&.{
+                "--config",
+                owner.fmt("target.{s}.linker=\"./linker\"", .{rust_target_string}),
+            });
+        }
+        // Compile step cannot run until after `cargo build`.
         output_path.addStepDependencies(&compile.step);
 
         const cargo_build_step = owner.allocator.create(BuildStep) catch @panic("OOM");

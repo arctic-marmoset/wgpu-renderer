@@ -93,7 +93,11 @@ pub fn build(b: *std.Build) !void {
             exe.linkSystemLibrary("Ws2_32");
         },
         else => {
-            std.debug.panic("unsupported platform: {}", .{target.result});
+            std.log.err("unsupported platform: {s}-{s}-{s}", .{
+                @tagName(target.result.cpu.arch),
+                @tagName(target.result.os.tag),
+                @tagName(target.result.abi),
+            });
         },
     }
 
