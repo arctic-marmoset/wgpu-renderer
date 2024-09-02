@@ -9,7 +9,7 @@ const mem = @import("mem.zig");
 const wgpu = @import("wgpu.zig");
 
 const Camera = @import("Camera.zig");
-const Gltf = @import("Gltf");
+const Gltf = @import("zgltf").Gltf;
 
 const Engine = @This();
 
@@ -590,8 +590,8 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         std.debug.assert(position_accessor.component_type == .float);
         std.debug.assert(uv_accessor.component_type == .float);
 
-        var position_iter = position_accessor.iterator(f32, &gltf_model, gltf_model.glb_binary.?);
-        var uv_iter = uv_accessor.iterator(f32, &gltf_model, gltf_model.glb_binary.?);
+        var position_iter = position_accessor.iterator(f32, gltf_model, gltf_model.glb_binary.?);
+        var uv_iter = uv_accessor.iterator(f32, gltf_model, gltf_model.glb_binary.?);
         while (position_iter.next()) |position| : (vertex_cursor += 1) {
             const uv = uv_iter.next().?;
             vertices[vertex_cursor] = .{
@@ -602,7 +602,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
 
         const index_accessor = gltf_model.data.accessors.items[primitive.indices.?];
         std.debug.assert(index_accessor.component_type == .unsigned_short);
-        var index_iter = index_accessor.iterator(u16, &gltf_model, gltf_model.glb_binary.?);
+        var index_iter = index_accessor.iterator(u16, gltf_model, gltf_model.glb_binary.?);
         while (index_iter.next()) |index| : (index_cursor += 1) {
             indices[index_cursor] = index[0];
         }

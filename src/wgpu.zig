@@ -264,7 +264,7 @@ pub fn TypeAttributeOptions(comptime T: type) type {
     }
 
     return @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = &fields,
             .decls = &.{},

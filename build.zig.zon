@@ -17,8 +17,8 @@
             .path = "extern/wgpu-native",
         },
         .zgltf = .{
-            .url = "git+https://github.com/kooparse/zgltf.git#17fb60b270fa25b3e07b7b3cdb253f86747f9616",
-            .hash = "1220ff2dbebeb83461da67b185d994ae61ebcea747c1bfbfb48b23c8e456cc53ea83",
+            .url = "git+https://github.com/arctic-marmoset/zgltf.git#1b656727d9734224e2431d840cf566a101da3097",
+            .hash = "12201c4ac247e55f32dfdba7978267e218b3f6111403eea73852d56d883f409c1189",
         },
     },
     .paths = .{

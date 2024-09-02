@@ -44,7 +44,7 @@ pub fn iota(slice: anytype, start: std.meta.Elem(@TypeOf(slice))) void {
 pub fn sizeOfElements(object: anytype) usize {
     const Type = @TypeOf(object);
     switch (@typeInfo(Type)) {
-        .Pointer => |pointer| {
+        .pointer => |pointer| {
             switch (pointer.size) {
                 .One, .Many => return @sizeOf(pointer.child),
                 .Slice => return @sizeOf(pointer.child) * object.len,

@@ -67,7 +67,7 @@ pub fn build(b: *std.Build) !void {
         exe.defineCMacro("MIDL_INTERFACE", "struct");
     }
     exe.addIncludePath(b.path("src"));
-    exe.root_module.addImport("Gltf", zgltf.module("zgltf"));
+    exe.root_module.addImport("zgltf", zgltf.module("zgltf"));
     exe.linkLibrary(cglm.artifact("cglm"));
     exe.linkLibrary(glfw.artifact("glfw"));
     exe.linkLibrary(ktx.artifact("ktx"));
