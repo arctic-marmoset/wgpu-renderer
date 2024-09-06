@@ -1,5 +1,5 @@
 pub usingnamespace @cImport({
-    @cInclude("WGR-ImGui-Bridge.h");
+    @cInclude("ImGuiBackend.h");
 
     @cDefine("CGLM_FORCE_DEPTH_ZERO_TO_ONE", {});
     // CGLM has to be LH because the transform matrices need to be aware of the
@@ -14,4 +14,6 @@ pub usingnamespace @cImport({
 
     @cInclude("ktx.h");
     @cInclude("vkformat_enum.h");
+
+    @cInclude("cimgui.h");
 });

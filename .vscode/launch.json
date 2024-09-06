@@ -10,9 +10,9 @@
             "request": "launch",
             "preLaunchTask": "build",
             "program": "${workspaceRoot}/zig-out/bin/wgpu-renderer",
+            "cwd": "${workspaceRoot}/zig-out/bin",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "${workspaceRoot}",
             "environment": [],
             "console": "integratedTerminal"
         },
@@ -22,8 +22,8 @@
             "request": "launch",
             "preLaunchTask": "build",
             "program": "${workspaceRoot}/zig-out/bin/wgpu-renderer",
-            "args": [],
-            "cwd": "${workspaceRoot}"
+            "cwd": "${workspaceRoot}/zig-out/bin",
+            "args": []
         }
     ]
 }

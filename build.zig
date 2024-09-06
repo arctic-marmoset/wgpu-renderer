@@ -71,6 +71,7 @@ pub fn build(b: *std.Build) !void {
             "extern/imgui/imgui_widgets.cpp",
             "extern/imgui/backends/imgui_impl_glfw.cpp",
             "extern/imgui/backends/imgui_impl_wgpu.cpp",
+            "extern/dear_bindings/cimgui.cpp",
         },
         .flags = &.{
             "-fno-exceptions",
@@ -79,7 +80,7 @@ pub fn build(b: *std.Build) !void {
     });
     exe.addCSourceFiles(.{
         .files = &.{
-            "src/WGR-ImGui-Bridge.cpp",
+            "src/ImGuiBackend.cpp",
         },
         .flags = &.{
             "-fno-exceptions",
@@ -92,6 +93,7 @@ pub fn build(b: *std.Build) !void {
     }
     exe.addIncludePath(b.path("extern/imgui"));
     exe.addIncludePath(b.path("extern/imgui/backends"));
+    exe.addIncludePath(b.path("extern/dear_bindings"));
     exe.addIncludePath(b.path("src"));
     exe.root_module.addImport("zgltf", zgltf.module("zgltf"));
     exe.linkLibrary(cglm.artifact("cglm"));

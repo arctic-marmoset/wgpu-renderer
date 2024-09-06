@@ -44,6 +44,8 @@ zig build
 
 - [cglm](https://github.com/recp/cglm)
 - [GLFW (ported to Zig build system)](https://github.com/slimsag/glfw)
+- [imgui](https://github.com/ocornut/imgui)
+    - C bindings provided by [dear_bindings](https://github.com/dearimgui/dear_bindings)
 - [libktx](https://github.com/KhronosGroup/KTX-Software)
 - [wgpu-native [v0.19.4.1]](https://github.com/gfx-rs/wgpu-native)
 - [zgltf](https://github.com/kooparse/zgltf)
