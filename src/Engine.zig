@@ -34,6 +34,9 @@ depth_format: c.WGPUTextureFormat,
 depth_texture: c.WGPUTexture,
 depth_texture_view: c.WGPUTextureView,
 
+imgui_context: *c.ImGuiContext,
+ui_state: c.WGRUIState,
+
 uniform: Uniform,
 uniform_buffer: c.WGPUBuffer,
 vbo: c.WGPUBuffer,
@@ -624,6 +627,16 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     errdefer c.wgpuBufferDestroy(ibo);
     c.wgpuQueueWriteBuffer(queue, ibo, 0, indices.ptr, ibo_content_size);
 
+    var imgui_context: ?*c.ImGuiContext = null;
+    if (!c.WGRImGuiInitialize(window, &.{
+        .device = device,
+        .renderTargetFormat = surface_format,
+        .depthStencilFormat = depth_format,
+    }, &imgui_context)) {
+        return error.WGRInitializeFailed;
+    }
+    errdefer c.WGRImGuiTerminate(imgui_context);
+
     engine.* = .{
         .allocator = allocator,
 
@@ -646,6 +659,11 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .depth_texture = depth_texture,
         .depth_texture_view = depth_texture_view,
 
+        .imgui_context = imgui_context.?,
+        .ui_state = .{
+            .demoWindowOpen = true,
+        },
+
         .uniform = uniform,
         .uniform_buffer = uniform_buffer,
         .vbo = vbo,
@@ -664,6 +682,8 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
 }
 
 pub fn deinit(self: *Engine) void {
+    c.WGRImGuiTerminate(self.imgui_context);
+
     c.wgpuBufferDestroy(self.uniform_buffer);
     c.wgpuBufferRelease(self.uniform_buffer);
     c.wgpuBufferDestroy(self.vbo);
@@ -709,6 +729,8 @@ fn renderFrame(self: *Engine) !void {
     ) orelse return error.GetNextTextureViewFailed;
     defer c.wgpuTextureViewRelease(view);
 
+    c.WGRImGuiBeginFrame(&self.ui_state);
+
     const encoder = c.wgpuDeviceCreateCommandEncoder(self.device, &.{});
     defer c.wgpuCommandEncoderRelease(encoder);
 
@@ -735,6 +757,7 @@ fn renderFrame(self: *Engine) !void {
     c.wgpuRenderPassEncoderSetVertexBuffer(render_pass, 0, self.vbo, 0, self.vbo_content_size);
     c.wgpuRenderPassEncoderSetIndexBuffer(render_pass, self.ibo, c.WGPUIndexFormat_Uint32, 0, self.ibo_content_size);
     c.wgpuRenderPassEncoderDrawIndexed(render_pass, @intCast(self.index_count), 1, 0, 0, 0);
+    c.WGRImGuiEndFrame(render_pass);
     c.wgpuRenderPassEncoderEnd(render_pass);
 
     const command_buffer = c.wgpuCommandEncoderFinish(encoder, &.{});
@@ -753,29 +776,31 @@ fn update(self: *Engine) void {
     var mut_mat4_identity: c.mat4 align(32) = undefined;
     c.glmc_mat4_identity(&mut_mat4_identity);
 
-    var move_direction: Camera.MoveDirection = .{};
-    if (c.glfwGetKey(self.window, c.GLFW_KEY_W) == c.GLFW_PRESS) {
-        move_direction.forward = true;
+    if (!c.WGRImGuiWantsCaptureKeyboard()) {
+        var move_direction: Camera.MoveDirection = .{};
+        if (c.glfwGetKey(self.window, c.GLFW_KEY_W) == c.GLFW_PRESS) {
+            move_direction.forward = true;
+        }
+        if (c.glfwGetKey(self.window, c.GLFW_KEY_A) == c.GLFW_PRESS) {
+            move_direction.left = true;
+        }
+        if (c.glfwGetKey(self.window, c.GLFW_KEY_S) == c.GLFW_PRESS) {
+            move_direction.backward = true;
+        }
+        if (c.glfwGetKey(self.window, c.GLFW_KEY_D) == c.GLFW_PRESS) {
+            move_direction.right = true;
+        }
+        if (c.glfwGetKey(self.window, c.GLFW_KEY_SPACE) == c.GLFW_PRESS) {
+            move_direction.up = true;
+        }
+        if (c.glfwGetKey(self.window, c.GLFW_KEY_LEFT_SHIFT) == c.GLFW_PRESS) {
+            move_direction.down = true;
+        }
+        move_direction.normalize();
+        self.camera.translate(move_direction);
+        c.glmc_mat4_copy(&self.camera.view, &self.uniform.view);
+        c.wgpuQueueWriteBuffer(self.queue, self.uniform_buffer, 0, &self.uniform, @sizeOf(Uniform));
     }
-    if (c.glfwGetKey(self.window, c.GLFW_KEY_A) == c.GLFW_PRESS) {
-        move_direction.left = true;
-    }
-    if (c.glfwGetKey(self.window, c.GLFW_KEY_S) == c.GLFW_PRESS) {
-        move_direction.backward = true;
-    }
-    if (c.glfwGetKey(self.window, c.GLFW_KEY_D) == c.GLFW_PRESS) {
-        move_direction.right = true;
-    }
-    if (c.glfwGetKey(self.window, c.GLFW_KEY_SPACE) == c.GLFW_PRESS) {
-        move_direction.up = true;
-    }
-    if (c.glfwGetKey(self.window, c.GLFW_KEY_LEFT_SHIFT) == c.GLFW_PRESS) {
-        move_direction.down = true;
-    }
-    move_direction.normalize();
-    self.camera.translate(move_direction);
-    c.glmc_mat4_copy(&self.camera.view, &self.uniform.view);
-    c.wgpuQueueWriteBuffer(self.queue, self.uniform_buffer, 0, &self.uniform, @sizeOf(Uniform));
 }
 
 // TODO: Deduplicate surface + depth texture creation (here and in init).
@@ -850,9 +875,11 @@ fn onMouseButtonAction(self: *Engine, button: c_int, action: c_int, modifiers: c
     _ = action; // autofix
     _ = modifiers; // autofix
     // TODO: This should probably be in `Engine.update`.
-    if (!self.mouse_captured) {
-        self.mouse_captured = true;
-        c.glfwSetInputMode(self.window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
+    if (!c.WGRImGuiWantsCaptureMouse()) {
+        if (!self.mouse_captured) {
+            self.mouse_captured = true;
+            c.glfwSetInputMode(self.window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
+        }
     }
 }
 

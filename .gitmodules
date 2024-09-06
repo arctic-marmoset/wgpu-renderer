@@ -7,3 +7,6 @@
 [submodule "extern/cglm/cglm"]
 	path = extern/cglm/cglm
 	url = https://github.com/recp/cglm.git
+[submodule "extern/imgui"]
+	path = extern/imgui
+	url = https://github.com/ocornut/imgui.git

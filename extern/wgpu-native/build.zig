@@ -29,8 +29,8 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    lib.installHeadersDirectory(b.path("wgpu-native/ffi/webgpu-headers"), "", .{});
-    lib.installHeader(b.path("wgpu-native/ffi/wgpu.h"), "wgpu.h");
+    lib.installHeadersDirectory(b.path("wgpu-native/ffi/webgpu-headers"), "webgpu", .{});
+    lib.installHeader(b.path("wgpu-native/ffi/wgpu.h"), "webgpu/wgpu.h");
 
     b.installArtifact(lib);
 }

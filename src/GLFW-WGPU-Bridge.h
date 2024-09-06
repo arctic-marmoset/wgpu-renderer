@@ -2,7 +2,7 @@
 
 #include <GLFW/glfw3.h>
 
-#include <wgpu.h>
+#include <webgpu/webgpu.h>
 
 #ifdef __cplusplus
 extern "C" {

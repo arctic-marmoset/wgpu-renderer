@@ -4,3 +4,5 @@ zig-out/
 
 /*.dasm
 *.DS_Store
+
+imgui.ini

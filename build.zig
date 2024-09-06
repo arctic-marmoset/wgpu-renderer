@@ -62,10 +62,36 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
+    exe.addCSourceFiles(.{
+        .files = &.{
+            "extern/imgui/imgui.cpp",
+            "extern/imgui/imgui_demo.cpp",
+            "extern/imgui/imgui_draw.cpp",
+            "extern/imgui/imgui_tables.cpp",
+            "extern/imgui/imgui_widgets.cpp",
+            "extern/imgui/backends/imgui_impl_glfw.cpp",
+            "extern/imgui/backends/imgui_impl_wgpu.cpp",
+        },
+        .flags = &.{
+            "-fno-exceptions",
+            "-fno-rtti",
+        },
+    });
+    exe.addCSourceFiles(.{
+        .files = &.{
+            "src/WGR-ImGui-Bridge.cpp",
+        },
+        .flags = &.{
+            "-fno-exceptions",
+            "-fno-rtti",
+        },
+    });
     if (target.result.os.tag == .windows) {
         // This needs to be explicitly defined if we want to use MSVC.
         exe.defineCMacro("MIDL_INTERFACE", "struct");
     }
+    exe.addIncludePath(b.path("extern/imgui"));
+    exe.addIncludePath(b.path("extern/imgui/backends"));
     exe.addIncludePath(b.path("src"));
     exe.root_module.addImport("zgltf", zgltf.module("zgltf"));
     exe.linkLibrary(cglm.artifact("cglm"));

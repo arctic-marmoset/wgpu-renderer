@@ -1,4 +1,6 @@
 pub usingnamespace @cImport({
+    @cInclude("WGR-ImGui-Bridge.h");
+
     @cDefine("CGLM_FORCE_DEPTH_ZERO_TO_ONE", {});
     // CGLM has to be LH because the transform matrices need to be aware of the
     // clip space coordinate system (which is LH in WebGPU).
@@ -8,7 +10,7 @@ pub usingnamespace @cImport({
     @cInclude("GLFW/glfw3.h");
     @cInclude("GLFW-WGPU-Bridge.h");
 
-    @cInclude("wgpu.h");
+    @cInclude("webgpu/wgpu.h");
 
     @cInclude("ktx.h");
     @cInclude("vkformat_enum.h");

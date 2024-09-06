@@ -1,3 +1,5 @@
 -Iextern/wgpu-native/wgpu-native/ffi
 -Iextern/wgpu-native/wgpu-native/ffi/webgpu-headers
+-Iextern/imgui
+-Iextern/imgui/backends
 -Izig-out/include

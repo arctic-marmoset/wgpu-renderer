@@ -1,9 +1,25 @@
+BasedOnStyle: LLVM
 ColumnLimit: 100
 IndentWidth: 4
-Cpp11BracedListStyle: false
-IndentPPDirectives: AfterHash
-PPIndentWidth: 2
-AlignConsecutiveMacros: AcrossEmptyLines
-AlignAfterOpenBracket: BlockIndent
+AccessModifierOffset: -4
+NamespaceIndentation: All
+BinPackParameters: false
+AllowAllParametersOfDeclarationOnNextLine: false
 BinPackArguments: false
 AllowAllArgumentsOnNextLine: false
+AlignAfterOpenBracket: BlockIndent
+AllowShortCaseLabelsOnASingleLine: true
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: true
+  AlignCaseColons: false
+AllowShortIfStatementsOnASingleLine: WithoutElse
+PackConstructorInitializers: Never
+BreakConstructorInitializers: BeforeComma
+Cpp11BracedListStyle: false
+AlwaysBreakTemplateDeclarations: Yes
+SpaceAfterTemplateKeyword: false
+AllowShortFunctionsOnASingleLine: Inline
+PenaltyBreakAssignment: 100
+PenaltyReturnTypeOnItsOwnLine: 300

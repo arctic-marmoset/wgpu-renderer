@@ -1,6 +1,9 @@
 Checks: >
     *,
+    -altera-struct-pack-align,
+    -fuchsia-default-arguments-calls,
+    -google-objc-*,
     -llvm-*,
     -llvmlibc-*,
-    -google-objc-*,
     -misc-misplaced-const,
+    -modernize-use-trailing-return-type,
