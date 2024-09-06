@@ -50,7 +50,7 @@ pub fn init(position: c.vec3, target: c.vec3) Camera {
     return camera;
 }
 
-pub fn translate(self: *Camera, move_direction: MoveDirection) void {
+pub fn translate(self: *Camera, delta_time: f32, move_direction: MoveDirection) void {
     var mut_world_forward = math.world_forward;
     // TODO: I think we need to negate here because we assume a LH clip space,
     // but I think all the glm_quat_* functions assume RH.
@@ -60,7 +60,7 @@ pub fn translate(self: *Camera, move_direction: MoveDirection) void {
 
     var changed = false;
 
-    const move_speed = 0.01;
+    const move_speed = 2.0 * delta_time;
     if (move_direction.forward) {
         changed = true;
         c.glm_vec3_muladds(&forward, move_speed, &self.position);

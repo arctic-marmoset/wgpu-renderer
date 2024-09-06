@@ -1,9 +1,18 @@
 Checks: >
     *,
     -altera-struct-pack-align,
+    -cppcoreguidelines-avoid-c-arrays,
+    -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
     -fuchsia-default-arguments-calls,
     -google-objc-*,
+    -hicpp-avoid-c-arrays,
+    -hicpp-no-array-decay,
+    -hicpp-signed-bitwise,
     -llvm-*,
     -llvmlibc-*,
     -misc-misplaced-const,
+    -modernize-avoid-c-arrays,
     -modernize-use-trailing-return-type,
+CheckOptions:
+    - key: readability-implicit-bool-conversion.AllowPointerConditions
+      value: 1

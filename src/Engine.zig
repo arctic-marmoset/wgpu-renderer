@@ -36,6 +36,7 @@ depth_texture_view: c.WGPUTextureView,
 
 imgui_context: *c.ImGuiContext,
 imgui_io: *c.ImGuiIO,
+last_instant: std.time.Instant,
 
 uniform: Uniform,
 uniform_buffer: c.WGPUBuffer,
@@ -663,6 +664,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
 
         .imgui_context = imgui_context,
         .imgui_io = c.ImGui_GetIO(),
+        .last_instant = std.time.Instant.now() catch unreachable,
 
         .uniform = uniform,
         .uniform_buffer = uniform_buffer,
@@ -714,8 +716,16 @@ pub fn deinit(self: *Engine) void {
 pub fn run(self: *Engine) !void {
     while (self.isRunning()) {
         c.glfwPollEvents();
-        self.update();
-        try self.renderFrame();
+
+        const now = std.time.Instant.now() catch unreachable;
+        const delta_time_ns = now.since(self.last_instant);
+        self.last_instant = now;
+        const delta_time_ns_f64: f64 = @floatFromInt(delta_time_ns);
+        const delta_time_s_f64 = delta_time_ns_f64 / std.time.ns_per_s;
+        const delta_time: f32 = @floatCast(delta_time_s_f64);
+
+        self.update(delta_time);
+        try self.renderFrame(delta_time);
     }
 }
 
@@ -723,7 +733,36 @@ fn isRunning(self: *Engine) bool {
     return c.glfwWindowShouldClose(self.window) != c.GLFW_TRUE;
 }
 
-fn renderFrame(self: *Engine) !void {
+fn renderStatistics(self: *Engine, delta_time: f32) void {
+    _ = self;
+
+    const padding = 8.0;
+    const viewport = c.ImGui_GetMainViewport();
+    const position: c.ImVec2 = .{
+        .x = viewport.*.WorkPos.x + padding,
+        .y = viewport.*.WorkPos.y + padding,
+    };
+
+    c.ImGui_PushStyleVar(c.ImGuiStyleVar_WindowBorderSize, 0.0);
+    c.ImGui_SetNextWindowBgAlpha(0.5);
+    c.ImGui_SetNextWindowPos(position, c.ImGuiCond_Always);
+    var stats_open = true;
+    _ = c.ImGui_Begin(
+        "Frame Statistics",
+        &stats_open,
+        c.ImGuiWindowFlags_NoDecoration |
+            c.ImGuiWindowFlags_AlwaysAutoResize |
+            c.ImGuiWindowFlags_NoSavedSettings |
+            c.ImGuiWindowFlags_NoFocusOnAppearing |
+            c.ImGuiWindowFlags_NoNav |
+            c.ImGuiWindowFlags_NoMove,
+    );
+    c.ImGui_Text("Frametime: %8.5f ms", delta_time * std.time.ms_per_s);
+    c.ImGui_End();
+    c.ImGui_PopStyleVar();
+}
+
+fn renderFrame(self: *Engine, delta_time: f32) !void {
     const view = wgpu.surfaceGetNextTextureView(
         self.surface,
         self.surface_format,
@@ -733,8 +772,8 @@ fn renderFrame(self: *Engine) !void {
     c.ImGuiBackendBeginFrame();
     c.ImGui_NewFrame();
 
-    var show = true;
-    c.ImGui_ShowDemoWindow(&show);
+    self.renderStatistics(delta_time);
+
     c.ImGui_Render();
 
     const encoder = c.wgpuDeviceCreateCommandEncoder(self.device, &.{});
@@ -774,11 +813,7 @@ fn renderFrame(self: *Engine) !void {
     _ = c.wgpuDevicePoll(self.device, @intFromBool(false), null);
 }
 
-fn update(self: *Engine) void {
-    // TODO: This needs to become a delta time.
-    const time: f32 = @floatCast(c.glfwGetTime());
-    _ = time; // autofix
-
+fn update(self: *Engine, delta_time: f32) void {
     var mut_mat4_identity: c.mat4 align(32) = undefined;
     c.glmc_mat4_identity(&mut_mat4_identity);
 
@@ -803,7 +838,7 @@ fn update(self: *Engine) void {
             move_direction.down = true;
         }
         move_direction.normalize();
-        self.camera.translate(move_direction);
+        self.camera.translate(delta_time, move_direction);
         c.glmc_mat4_copy(&self.camera.view, &self.uniform.view);
         c.wgpuQueueWriteBuffer(self.queue, self.uniform_buffer, 0, &self.uniform, @sizeOf(Uniform));
     }
