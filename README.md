@@ -28,9 +28,10 @@ dependencies to cross-compile cleanly.)
 
 ## Requirements
 
-|Tool|Version    |
-|----|-----------|
-|Zig |`>=0.14.0`|
+| Tool | Version                                            |
+|------|----------------------------------------------------|
+| Zig  | `>=0.14.0`                                         |
+| Rust | `>=1.80.1` (not sure what the minimum required is) |
 
 ## Setting Up
 
