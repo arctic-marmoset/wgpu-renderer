@@ -444,8 +444,8 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     defer c.wgpuSamplerRelease(linear_sampler);
 
     const framebuffer_size = glfw.getFramebufferSize(window);
-    var camera = Camera.init(.{ 0.0, 0.0, -5.0 }, math.world_forward);
-    var uniform: Uniform = undefined;
+    const camera = Camera.init(@as(math.Vec3, @splat(0.0)) - math.vec3Scale(math.world_forward, 5.0), math.world_forward);
+
     // This model matrix converts from the glTF coordinate system to our world
     // space convention. It *must* be applied to all objects. The contents of
     // the matrix are defined as follows:
@@ -458,7 +458,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     // TODO: Any way to compute these (at comptime), based on the glTF axes and
     // our worldspace axes?
     // zig fmt: off
-    uniform.model = .{
+    const model: math.Mat4 = .{
         .{ -1.0,  0.0, 0.0, 0.0 },
         .{  0.0, -1.0, 0.0, 0.0 },
         .{  0.0,  0.0, 1.0, 0.0 },
@@ -468,12 +468,14 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     // The dragon is kind of small. Scale it up.
     const scale = 10.0;
     const isotropic_scale: math.Vec3 = @splat(scale);
-    uniform.model = math.scale(uniform.model, isotropic_scale);
     const aspect_ratio =
         @as(f32, @floatFromInt(framebuffer_size.width)) / @as(f32, @floatFromInt(framebuffer_size.height));
     const camera_matrices = camera.computeMatrices();
-    uniform.view = camera_matrices.view;
-    uniform.proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01);
+    const uniform: Uniform = .{
+        .model = math.scale(model, isotropic_scale),
+        .view = camera_matrices.view,
+        .proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01),
+    };
     const uniform_buffer = c.wgpuDeviceCreateBuffer(device, &.{
         .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
         .size = @sizeOf(Uniform),

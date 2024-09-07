@@ -3,9 +3,11 @@ const std = @import("std");
 const c = @import("c.zig");
 
 // Vulkan clip space coordinate system.
-pub const world_up: Vec3 = .{ 0.0, -1.0, 0.0 };
-pub const world_forward: Vec3 = .{ 0.0, 0.0, 1.0 };
-pub const world_right: Vec3 = .{ 1.0, 0.0, 0.0 };
+// zig fmt: off
+pub const world_up:      Vec3 = .{ 0.0, -1.0, 0.0 };
+pub const world_forward: Vec3 = .{ 0.0,  0.0, 1.0 };
+pub const world_right:   Vec3 = .{ 1.0,  0.0, 0.0 };
+// zig fmt: on
 
 pub const Vec2 = @Vector(2, f32);
 pub const Vec3 = @Vector(3, f32);
