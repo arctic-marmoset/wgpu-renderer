@@ -681,63 +681,79 @@ pub fn deinit(self: *Engine) void {
 pub fn run(self: *Engine) !void {
     while (self.isRunning()) {
         c.glfwPollEvents();
-
-        const now = std.time.Instant.now() catch unreachable;
-        const delta_time_ns = now.since(self.last_instant);
-        self.last_instant = now;
-        const delta_time_ns_f64: f64 = @floatFromInt(delta_time_ns);
-        const delta_time_s_f64 = delta_time_ns_f64 / std.time.ns_per_s;
-        const delta_time: f32 = @floatCast(delta_time_s_f64);
-
-        self.update(delta_time);
-        try self.renderFrame(delta_time);
+        self.tick();
     }
+}
+
+fn tick(self: *Engine) void {
+    const now = std.time.Instant.now() catch unreachable;
+    const delta_time_ns = now.since(self.last_instant);
+    self.last_instant = now;
+    const delta_time_ns_f64: f64 = @floatFromInt(delta_time_ns);
+    const delta_time_s_f64 = delta_time_ns_f64 / std.time.ns_per_s;
+    const delta_time: f32 = @floatCast(delta_time_s_f64);
+
+    self.update(delta_time);
+    self.renderFrame(delta_time);
+}
+
+fn createSwapChain(self: *Engine, width: u32, height: u32) void {
+    c.wgpuSurfaceConfigure(self.surface, &.{
+        .device = self.device,
+        .format = self.surface_format,
+        .usage = c.WGPUTextureUsage_RenderAttachment,
+        .alphaMode = c.WGPUCompositeAlphaMode_Auto,
+        .width = width,
+        .height = height,
+        .presentMode = self.present_mode,
+    });
+
+    const depth_texture = c.wgpuDeviceCreateTexture(self.device, &.{
+        .usage = c.WGPUTextureUsage_RenderAttachment,
+        .dimension = c.WGPUTextureDimension_2D,
+        .size = .{
+            .width = width,
+            .height = height,
+            .depthOrArrayLayers = 1,
+        },
+        .format = self.depth_format,
+        .mipLevelCount = 1,
+        .sampleCount = 1,
+        .viewFormatCount = 1,
+        .viewFormats = &self.depth_format,
+    });
+    errdefer c.wgpuTextureRelease(depth_texture);
+    errdefer c.wgpuTextureDestroy(depth_texture);
+    const depth_texture_view = c.wgpuTextureCreateView(depth_texture, &.{
+        .format = self.depth_format,
+        .dimension = c.WGPUTextureViewDimension_2D,
+        .baseMipLevel = 0,
+        .mipLevelCount = 1,
+        .baseArrayLayer = 0,
+        .arrayLayerCount = 1,
+        .aspect = c.WGPUTextureAspect_DepthOnly,
+    });
+    errdefer c.wgpuTextureViewRelease(depth_texture_view);
+
+    self.depth_texture = depth_texture;
+    self.depth_texture_view = depth_texture_view;
 }
 
 fn isRunning(self: *Engine) bool {
     return c.glfwWindowShouldClose(self.window) != c.GLFW_TRUE;
 }
 
-fn renderStatistics(self: *Engine, delta_time: f32) void {
-    _ = self;
-
-    const padding = 8.0;
-    const viewport = c.ImGui_GetMainViewport();
-    const position: c.ImVec2 = .{
-        .x = viewport.*.WorkPos.x + padding,
-        .y = viewport.*.WorkPos.y + padding,
-    };
-
-    c.ImGui_PushStyleVar(c.ImGuiStyleVar_WindowBorderSize, 0.0);
-    c.ImGui_SetNextWindowBgAlpha(0.5);
-    c.ImGui_SetNextWindowPos(position, c.ImGuiCond_Always);
-    var stats_open = true;
-    _ = c.ImGui_Begin(
-        "Frame Statistics",
-        &stats_open,
-        c.ImGuiWindowFlags_NoDecoration |
-            c.ImGuiWindowFlags_AlwaysAutoResize |
-            c.ImGuiWindowFlags_NoSavedSettings |
-            c.ImGuiWindowFlags_NoFocusOnAppearing |
-            c.ImGuiWindowFlags_NoNav |
-            c.ImGuiWindowFlags_NoMove,
-    );
-    c.ImGui_Text("Frametime: %8.5f ms", delta_time * std.time.ms_per_s);
-    c.ImGui_End();
-    c.ImGui_PopStyleVar();
-}
-
-fn renderFrame(self: *Engine, delta_time: f32) !void {
+fn renderFrame(self: *Engine, delta_time: f32) void {
     const view = wgpu.surfaceGetNextTextureView(
         self.surface,
         self.surface_format,
-    ) orelse return error.GetNextTextureViewFailed;
+    ) orelse return;
     defer c.wgpuTextureViewRelease(view);
 
     c.ImGuiBackendBeginFrame();
     c.ImGui_NewFrame();
 
-    self.renderStatistics(delta_time);
+    renderStatistics(delta_time);
 
     c.ImGui_Render();
 
@@ -809,46 +825,10 @@ fn update(self: *Engine, delta_time: f32) void {
     }
 }
 
-fn createSwapChain(self: *Engine, width: u32, height: u32) void {
-    c.wgpuSurfaceConfigure(self.surface, &.{
-        .device = self.device,
-        .format = self.surface_format,
-        .usage = c.WGPUTextureUsage_RenderAttachment,
-        .alphaMode = c.WGPUCompositeAlphaMode_Auto,
-        .width = width,
-        .height = height,
-        .presentMode = self.present_mode,
-    });
-
-    const depth_texture = c.wgpuDeviceCreateTexture(self.device, &.{
-        .usage = c.WGPUTextureUsage_RenderAttachment,
-        .dimension = c.WGPUTextureDimension_2D,
-        .size = .{
-            .width = width,
-            .height = height,
-            .depthOrArrayLayers = 1,
-        },
-        .format = self.depth_format,
-        .mipLevelCount = 1,
-        .sampleCount = 1,
-        .viewFormatCount = 1,
-        .viewFormats = &self.depth_format,
-    });
-    errdefer c.wgpuTextureRelease(depth_texture);
-    errdefer c.wgpuTextureDestroy(depth_texture);
-    const depth_texture_view = c.wgpuTextureCreateView(depth_texture, &.{
-        .format = self.depth_format,
-        .dimension = c.WGPUTextureViewDimension_2D,
-        .baseMipLevel = 0,
-        .mipLevelCount = 1,
-        .baseArrayLayer = 0,
-        .arrayLayerCount = 1,
-        .aspect = c.WGPUTextureAspect_DepthOnly,
-    });
-    errdefer c.wgpuTextureViewRelease(depth_texture_view);
-
-    self.depth_texture = depth_texture;
-    self.depth_texture_view = depth_texture_view;
+fn onFramebufferSizeChanged(self: *Engine, width: u32, height: u32) void {
+    self.recreateSwapChain(width, height);
+    const aspect_ratio = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
+    math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01, &self.uniform.proj);
 }
 
 fn recreateSwapChain(self: *Engine, width: u32, height: u32) void {
@@ -857,13 +837,6 @@ fn recreateSwapChain(self: *Engine, width: u32, height: u32) void {
     c.wgpuTextureRelease(self.depth_texture);
 
     self.createSwapChain(width, height);
-}
-
-// TODO: Not sure I want to do the resizing in here.
-fn onFramebufferSizeChanged(self: *Engine, width: u32, height: u32) void {
-    self.recreateSwapChain(width, height);
-    const aspect_ratio = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
-    math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01, &self.uniform.proj);
 }
 
 fn onKeyAction(self: *Engine, key: c_int, scancode: c_int, action: c_int, modifiers: c_int) void {
@@ -979,6 +952,33 @@ fn onUncapturedError(
     if (builtin.mode == .Debug) {
         @breakpoint();
     }
+}
+
+fn renderStatistics(delta_time: f32) void {
+    const padding = 8.0;
+    const viewport = c.ImGui_GetMainViewport();
+    const position: c.ImVec2 = .{
+        .x = viewport.*.WorkPos.x + padding,
+        .y = viewport.*.WorkPos.y + padding,
+    };
+
+    c.ImGui_PushStyleVar(c.ImGuiStyleVar_WindowBorderSize, 0.0);
+    c.ImGui_SetNextWindowBgAlpha(0.5);
+    c.ImGui_SetNextWindowPos(position, c.ImGuiCond_Always);
+    var stats_open = true;
+    _ = c.ImGui_Begin(
+        "Frame Statistics",
+        &stats_open,
+        c.ImGuiWindowFlags_NoDecoration |
+            c.ImGuiWindowFlags_AlwaysAutoResize |
+            c.ImGuiWindowFlags_NoSavedSettings |
+            c.ImGuiWindowFlags_NoFocusOnAppearing |
+            c.ImGuiWindowFlags_NoNav |
+            c.ImGuiWindowFlags_NoMove,
+    );
+    c.ImGui_Text("Frametime: %8.5f ms", delta_time * std.time.ms_per_s);
+    c.ImGui_End();
+    c.ImGui_PopStyleVar();
 }
 
 fn openDataDir(allocator: std.mem.Allocator) !std.fs.Dir {
