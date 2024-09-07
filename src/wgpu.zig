@@ -188,24 +188,10 @@ pub fn deviceLoadTexture(
     return .{ texture, format };
 }
 
-// TODO: Reading shader data isn't this function's responsibility.
 pub fn deviceCreateShaderModuleSPIRV(
     device: c.WGPUDevice,
-    allocator: std.mem.Allocator,
-    data_dir: std.fs.Dir,
-    relative_path: []const u8,
+    bytecode: []const u32,
 ) !c.WGPUShaderModule {
-    const bytes = try data_dir.readFileAllocOptions(
-        allocator,
-        relative_path,
-        4 * 1024 * 1024,
-        null,
-        @alignOf(u32),
-        null,
-    );
-    defer allocator.free(bytes);
-
-    const bytecode = std.mem.bytesAsSlice(u32, bytes);
     const spirv_descriptor: c.WGPUShaderModuleSPIRVDescriptor = .{
         .chain = .{
             .next = null,

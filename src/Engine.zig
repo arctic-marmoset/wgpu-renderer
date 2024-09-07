@@ -236,19 +236,33 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     });
     defer c.wgpuPipelineLayoutRelease(pipeline_layout);
 
+    const vs_data = try data_dir.readFileAllocOptions(
+        allocator,
+        "shaders/basic.vert.spv",
+        4 * 1024 * 1024,
+        null,
+        @alignOf(u32),
+        null,
+    );
+    defer allocator.free(vs_data);
     const vs_module = try wgpu.deviceCreateShaderModuleSPIRV(
         device,
-        allocator,
-        data_dir,
-        "shaders/basic.vert.spv",
+        std.mem.bytesAsSlice(u32, vs_data),
     );
     defer c.wgpuShaderModuleRelease(vs_module);
 
+    const fs_data = try data_dir.readFileAllocOptions(
+        allocator,
+        "shaders/basic.frag.spv",
+        4 * 1024 * 1024,
+        null,
+        @alignOf(u32),
+        null,
+    );
+    defer allocator.free(fs_data);
     const fs_module = try wgpu.deviceCreateShaderModuleSPIRV(
         device,
-        allocator,
-        data_dir,
-        "shaders/basic.frag.spv",
+        std.mem.bytesAsSlice(u32, fs_data),
     );
     defer c.wgpuShaderModuleRelease(fs_module);
 
