@@ -49,12 +49,12 @@ index_count: usize,
 camera: Camera,
 
 mouse_captured: bool,
-last_mouse_position: c.vec2,
+last_mouse_position: math.Vec2,
 
 const Uniform = extern struct {
-    model: c.mat4 align(32),
-    view: c.mat4 align(32),
-    proj: c.mat4 align(32),
+    model: math.Mat4,
+    view: math.Mat4,
+    proj: math.Mat4,
 };
 
 // Heap allocating lets us freely pass the pointer to callbacks.
@@ -93,7 +93,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     if (c.glfwRawMouseMotionSupported() == c.GLFW_TRUE) {
         c.glfwSetInputMode(window, c.GLFW_RAW_MOUSE_MOTION, c.GLFW_TRUE);
     }
-    const mouse_position: c.vec2 = blk: {
+    const mouse_position: math.Vec2 = blk: {
         var x: f64 = undefined;
         var y: f64 = undefined;
         c.glfwGetCursorPos(window, &x, &y);
@@ -321,7 +321,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     ) orelse c.WGPUPresentMode_Fifo;
     std.log.debug("selected present mode: {s}", .{wgpu.presentModeToString(present_mode)});
 
-    const Vertex = struct { position: c.vec3, uv: c.vec2 };
+    const Vertex = struct { position: math.Vec3, uv: math.Vec2 };
     const vertex_attributes = wgpu.vertexAttributesFromType(Vertex, .{});
 
     // Must declare type otherwise compilation fails on macOS with:
@@ -344,11 +344,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         },
         .primitive = .{
             .topology = c.WGPUPrimitiveTopology_TriangleList,
-            // I want my models to be glTF format, which uses RH (-X right,
-            // +Y up) but WebGPU expects LH. Converting from RH to LH causes the
-            // axes to flip, which also flips the winding order from glTF's CCW
-            // to CW.
-            .frontFace = c.WGPUFrontFace_CW,
+            .frontFace = c.WGPUFrontFace_CCW,
             .cullMode = c.WGPUCullMode_Back,
         },
         .depthStencil = &.{
@@ -471,13 +467,13 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     // zig fmt: on
     // The dragon is kind of small. Scale it up.
     const scale = 10.0;
-    var isotropic_scale: c.vec3 = undefined;
-    c.glm_vec3_fill(&isotropic_scale, scale);
-    c.glmc_scale(&uniform.model, &isotropic_scale);
+    const isotropic_scale: math.Vec3 = @splat(scale);
+    uniform.model = math.scale(uniform.model, isotropic_scale);
     const aspect_ratio =
         @as(f32, @floatFromInt(framebuffer_size.width)) / @as(f32, @floatFromInt(framebuffer_size.height));
-    c.glmc_mat4_copy(&camera.view, &uniform.view);
-    math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01, &uniform.proj);
+    const camera_matrices = camera.computeMatrices();
+    uniform.view = camera_matrices.view;
+    uniform.proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01);
     const uniform_buffer = c.wgpuDeviceCreateBuffer(device, &.{
         .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
         .size = @sizeOf(Uniform),
@@ -824,9 +820,6 @@ fn renderFrame(self: *Engine, delta_time: f32) void {
 }
 
 fn update(self: *Engine, delta_time: f32) void {
-    var mut_mat4_identity: c.mat4 align(32) = undefined;
-    c.glmc_mat4_identity(&mut_mat4_identity);
-
     if (!self.imgui_io.WantCaptureKeyboard) {
         var move_direction: Camera.MoveDirection = .{};
         if (c.glfwGetKey(self.window, c.GLFW_KEY_W) == c.GLFW_PRESS) {
@@ -849,7 +842,8 @@ fn update(self: *Engine, delta_time: f32) void {
         }
         move_direction.normalize();
         self.camera.translate(delta_time, move_direction);
-        c.glmc_mat4_copy(&self.camera.view, &self.uniform.view);
+        const camera_matrices = self.camera.computeMatrices();
+        self.uniform.view = camera_matrices.view;
         c.wgpuQueueWriteBuffer(self.queue, self.uniform_buffer, 0, &self.uniform, @sizeOf(Uniform));
     }
 }
@@ -857,7 +851,7 @@ fn update(self: *Engine, delta_time: f32) void {
 fn onFramebufferSizeChanged(self: *Engine, width: u32, height: u32) void {
     self.recreateSwapChain(width, height);
     const aspect_ratio = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
-    math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01, &self.uniform.proj);
+    self.uniform.proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01);
 }
 
 fn recreateSwapChain(self: *Engine, width: u32, height: u32) void {
@@ -896,9 +890,8 @@ fn onMouseButtonAction(self: *Engine, button: c_int, action: c_int, modifiers: c
 
 fn onMousePositionChanged(self: *Engine, x: f64, y: f64) void {
     if (!self.mouse_captured) return;
-    var position: c.vec2 = .{ @floatCast(x), @floatCast(y) };
-    var delta: c.vec2 = undefined;
-    c.glm_vec2_sub(&position, &self.last_mouse_position, &delta);
+    const position: math.Vec2 = .{ @floatCast(x), @floatCast(y) };
+    const delta = position - self.last_mouse_position;
     self.last_mouse_position = position;
     // TODO: This should be in `Engine.update`.
     self.camera.updateOrientation(delta);

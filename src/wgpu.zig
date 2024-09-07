@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const c = @import("c.zig");
+const math = @import("math.zig");
 const ktx = @import("ktx.zig");
 
 const Nonnull = std.meta.Child;
@@ -218,9 +219,9 @@ fn vertexFormatFromType(comptime T: type, comptime normalized: bool) c.WGPUVerte
         [2]f16 => c.WGPUVertexFormat_Float16x2,
         [4]f16 => c.WGPUVertexFormat_Float16x4,
         f32 => c.WGPUVertexFormat_Float32,
-        [2]f32 => c.WGPUVertexFormat_Float32x2,
-        [3]f32 => c.WGPUVertexFormat_Float32x3,
-        [4]f32 => c.WGPUVertexFormat_Float32x4,
+        [2]f32, math.Vec2 => c.WGPUVertexFormat_Float32x2,
+        [3]f32, math.Vec3 => c.WGPUVertexFormat_Float32x3,
+        [4]f32, math.Vec4 => c.WGPUVertexFormat_Float32x4,
         u32 => if (normalized) c.WGPUVertexFormat_Unorm32 else c.WGPUVertexFormat_Uint32,
         [2]u32 => if (normalized) c.WGPUVertexFormat_Unorm32x2 else c.WGPUVertexFormat_Uint32x2,
         [3]u32 => if (normalized) c.WGPUVertexFormat_Unorm32x3 else c.WGPUVertexFormat_Uint32x3,
@@ -229,7 +230,7 @@ fn vertexFormatFromType(comptime T: type, comptime normalized: bool) c.WGPUVerte
         [2]i32 => if (normalized) c.WGPUVertexFormat_Snorm32x2 else c.WGPUVertexFormat_Sint32x2,
         [3]i32 => if (normalized) c.WGPUVertexFormat_Snorm32x3 else c.WGPUVertexFormat_Sint32x3,
         [4]i32 => if (normalized) c.WGPUVertexFormat_Snorm32x4 else c.WGPUVertexFormat_Sint32x4,
-        else => @compileError("unsupported vertex format type: " ++ @tagName(T)),
+        else => @compileError("unsupported vertex format type: " ++ @typeName(T)),
     };
 }
 

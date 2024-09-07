@@ -1,16 +1,17 @@
-const c = @import("c.zig");
+const std = @import("std");
 
+const c = @import("c.zig");
 const math = @import("math.zig");
 
 const Camera = @This();
 
-// TODO: Maybe don't use quaternions?
-// Quaternions are useful if we're getting absolute data:
-// https://www.reddit.com/r/opengl/comments/im0tex/comment/g3wc05r
-// Need to track pitch separately anyway to be able to clamp it.
-position: c.vec3,
-orientation: c.versor align(32),
-view: c.mat4 align(32),
+position: math.Vec3,
+pitch: f32,
+yaw: f32,
+
+const Matrices = struct {
+    view: math.Mat4,
+};
 
 pub const MoveDirection = struct {
     forward: bool = false,
@@ -36,100 +37,72 @@ pub const MoveDirection = struct {
     }
 };
 
-pub fn init(position: c.vec3, target: c.vec3) Camera {
-    var mut_position = position;
-    var mut_target = target;
+pub fn init(position: math.Vec3, target: math.Vec3) Camera {
+    const direction: math.Vec3 = math.vec3Normalize(target - position);
 
-    var camera: Camera = undefined;
-    c.glm_vec3_copy(&mut_position, &camera.position);
+    const pitch = std.math.asin(direction[1]);
+    const yaw = std.math.atan2(direction[0], direction[2]);
 
-    var mut_world_up = math.world_up;
-    c.glm_quat_forp(&mut_position, &mut_target, &mut_world_up, &camera.orientation);
+    const camera: Camera = .{
+        .position = position,
+        .yaw = yaw,
+        .pitch = pitch,
+    };
 
-    constructViewTransform(camera.position, camera.orientation, &camera.view);
     return camera;
 }
 
 pub fn translate(self: *Camera, delta_time: f32, move_direction: MoveDirection) void {
-    var mut_world_forward = math.world_forward;
-    // TODO: I think we need to negate here because we assume a LH clip space,
-    // but I think all the glm_quat_* functions assume RH.
-    c.glm_vec3_negate(&mut_world_forward);
-    var forward: c.vec3 = undefined;
-    c.glmc_quat_rotatev(&self.orientation, &mut_world_forward, &forward);
+    const forward = math.forwardVectorFromEuler(self.pitch, self.yaw);
 
     var changed = false;
 
     const move_speed = 2.0 * delta_time;
+    const move_speed_vec3: math.Vec3 = @splat(move_speed);
     if (move_direction.forward) {
         changed = true;
-        c.glm_vec3_muladds(&forward, move_speed, &self.position);
+        self.position += forward * move_speed_vec3;
     } else if (move_direction.backward) {
         changed = true;
-        c.glm_vec3_muladds(&forward, -move_speed, &self.position);
+        self.position += forward * -move_speed_vec3;
     }
 
-    var mut_world_up = math.world_up;
-    var right: c.vec3 = undefined;
-    c.glm_vec3_cross(&mut_world_up, &forward, &right);
-    c.glm_vec3_normalize(&right);
+    const right = math.vec3CrossNormalize(forward, math.world_up);
     if (move_direction.left) {
         changed = true;
-        c.glm_vec3_muladds(&right, -move_speed, &self.position);
+        self.position += right * -move_speed_vec3;
     } else if (move_direction.right) {
         changed = true;
-        c.glm_vec3_muladds(&right, move_speed, &self.position);
+        self.position += right * move_speed_vec3;
     }
 
     if (move_direction.up) {
         changed = true;
-        c.glm_vec3_muladds(&mut_world_up, move_speed, &self.position);
+        self.position += math.world_up * move_speed_vec3;
     } else if (move_direction.down) {
         changed = true;
-        c.glm_vec3_muladds(&mut_world_up, -move_speed, &self.position);
-    }
-
-    if (changed) {
-        constructViewTransform(self.position, self.orientation, &self.view);
+        self.position += math.world_up * -move_speed_vec3;
     }
 }
 
-pub fn updateOrientation(self: *Camera, offset: c.vec2) void {
-    var mut_offset = offset;
-    var mut_x_axis: c.vec3 = .{ 1.0, 0.0, 0.0 };
-    var mut_world_up = math.world_up;
+pub fn updateOrientation(self: *Camera, offset: math.Vec2) void {
+    const sensitivity = 0.005;
+    const pitch_limit = 0.5 * std.math.pi - 0.01;
 
-    var scale: c.vec2 = undefined;
-    c.glm_vec2_fill(&scale, 0.001);
-    var delta: c.vec2 = undefined;
-    c.glm_vec2_mul(&scale, &mut_offset, &delta);
+    const delta_yaw = sensitivity * offset[0];
+    const delta_pitch = sensitivity * offset[1];
 
-    var pitch: c.versor align(32) = undefined;
-    c.glm_quatv(&pitch, -delta[1], &mut_x_axis);
-    var yaw: c.versor align(32) = undefined;
-    c.glm_quatv(&yaw, delta[0], &mut_world_up);
-
-    c.glmc_quat_mul(&yaw, &self.orientation, &self.orientation);
-    c.glmc_quat_mul(&self.orientation, &pitch, &self.orientation);
-    c.glmc_quat_normalize(&self.orientation);
-
-    constructViewTransform(self.position, self.orientation, &self.view);
+    self.yaw = @mod(self.yaw + delta_yaw, 2.0 * std.math.pi);
+    self.pitch = std.math.clamp(self.pitch + delta_pitch, -pitch_limit, pitch_limit);
 }
 
-fn constructViewTransform(
-    position: c.vec3,
-    orientation: c.versor,
-    destination: *align(32) c.mat4,
-) void {
-    var mut_world_up = math.world_up;
-    var mut_world_forward = math.world_forward;
-    var mut_position = position;
-    var mut_orientation: c.versor align(32) = orientation;
+pub fn computeMatrices(self: Camera) Matrices {
+    const forward = math.forwardVectorFromEuler(self.pitch, self.yaw);
+    const target = self.position + forward;
 
-    var forward: c.vec3 = undefined;
-    c.glmc_quat_rotatev(&mut_orientation, &mut_world_forward, &forward);
+    const matrices: Matrices = .{
+        .view = math.lookAt(self.position, target, math.world_up),
+    };
 
-    var target: c.vec3 = undefined;
-    c.glm_vec3_add(&mut_position, &forward, &target);
-    c.glmc_lookat(&mut_position, &target, &mut_world_up, destination);
+    return matrices;
 }
