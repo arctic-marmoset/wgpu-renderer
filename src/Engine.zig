@@ -747,7 +747,22 @@ fn renderFrame(self: *Engine, delta_time: f32) void {
     const view = wgpu.surfaceGetNextTextureView(
         self.surface,
         self.surface_format,
-    ) orelse return;
+    ) catch |err| switch (err) {
+        error.SurfaceTextureOutOfDate,
+        error.SurfaceTextureSuboptimal,
+        => {
+            const extent = glfw.getFramebufferSize(self.window);
+            self.recreateSwapChain(extent.width, extent.height);
+            return;
+        },
+        error.OutOfMemory,
+        error.DeviceLost,
+        => {
+            std.debug.panic("fatal error attempting to acquire next texture view: {s}", .{
+                @errorName(err),
+            });
+        },
+    };
     defer c.wgpuTextureViewRelease(view);
 
     c.ImGuiBackendBeginFrame();

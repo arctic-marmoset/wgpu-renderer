@@ -300,11 +300,27 @@ pub fn vertexAttributesFromType(
 pub fn surfaceGetNextTextureView(
     surface: c.WGPUSurface,
     format: c.WGPUTextureFormat,
-) c.WGPUTextureView {
+) !Nonnull(c.WGPUTextureView) {
     var surface_texture: c.WGPUSurfaceTexture = undefined;
     c.wgpuSurfaceGetCurrentTexture(surface, &surface_texture);
-    if (surface_texture.status != c.WGPUSurfaceGetCurrentTextureStatus_Success) {
-        return null;
+    switch (surface_texture.status) {
+        c.WGPUSurfaceGetCurrentTextureStatus_Success => {
+            if (surface_texture.suboptimal == @intFromBool(true)) {
+                return error.SurfaceTextureSuboptimal;
+            }
+        },
+        c.WGPUSurfaceGetCurrentTextureStatus_Timeout,
+        c.WGPUSurfaceGetCurrentTextureStatus_Outdated,
+        c.WGPUSurfaceGetCurrentTextureStatus_Lost,
+        => {
+            if (surface_texture.texture) |texture| {
+                c.wgpuTextureRelease(texture);
+            }
+            return error.SurfaceTextureOutOfDate;
+        },
+        c.WGPUSurfaceGetCurrentTextureStatus_OutOfMemory => return error.OutOfMemory,
+        c.WGPUSurfaceGetCurrentTextureStatus_DeviceLost => return error.DeviceLost,
+        else => unreachable,
     }
 
     const view = c.wgpuTextureCreateView(surface_texture.texture, &.{
@@ -317,7 +333,7 @@ pub fn surfaceGetNextTextureView(
         .aspect = c.WGPUTextureAspect_All,
     });
 
-    return view;
+    return view.?;
 }
 
 const HexColor = packed struct(u32) {
