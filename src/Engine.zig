@@ -307,18 +307,6 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     ) orelse c.WGPUPresentMode_Fifo;
     std.log.debug("selected present mode: {s}", .{wgpu.presentModeToString(present_mode)});
 
-    const framebuffer_size = glfw.getFramebufferSize(window);
-    c.wgpuSurfaceConfigure(surface, &.{
-        .device = device,
-        .format = surface_format,
-        .usage = c.WGPUTextureUsage_RenderAttachment,
-        .alphaMode = c.WGPUCompositeAlphaMode_Auto,
-        .width = framebuffer_size.width,
-        .height = framebuffer_size.height,
-        .presentMode = present_mode,
-    });
-    errdefer c.wgpuSurfaceUnconfigure(surface);
-
     const Vertex = struct { position: c.vec3, uv: c.vec2 };
     const vertex_attributes = wgpu.vertexAttributesFromType(Vertex, .{});
 
@@ -400,33 +388,6 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     });
     errdefer c.wgpuRenderPipelineRelease(pipeline);
 
-    const depth_texture = c.wgpuDeviceCreateTexture(device, &.{
-        .usage = c.WGPUTextureUsage_RenderAttachment,
-        .dimension = c.WGPUTextureDimension_2D,
-        .size = .{
-            .width = framebuffer_size.width,
-            .height = framebuffer_size.height,
-            .depthOrArrayLayers = 1,
-        },
-        .format = depth_format,
-        .mipLevelCount = 1,
-        .sampleCount = 1,
-        .viewFormatCount = 1,
-        .viewFormats = &depth_format,
-    });
-    errdefer c.wgpuTextureRelease(depth_texture);
-    errdefer c.wgpuTextureDestroy(depth_texture);
-    const depth_texture_view = c.wgpuTextureCreateView(depth_texture, &.{
-        .format = depth_format,
-        .dimension = c.WGPUTextureViewDimension_2D,
-        .baseMipLevel = 0,
-        .mipLevelCount = 1,
-        .baseArrayLayer = 0,
-        .arrayLayerCount = 1,
-        .aspect = c.WGPUTextureAspect_DepthOnly,
-    });
-    errdefer c.wgpuTextureViewRelease(depth_texture_view);
-
     // TODO: Do tonemapping so HDR textures look ok with SDR display.
     const model_texture_data = try data_dir.readFileAlloc(
         allocator,
@@ -472,6 +433,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     });
     defer c.wgpuSamplerRelease(linear_sampler);
 
+    const framebuffer_size = glfw.getFramebufferSize(window);
     var camera = Camera.init(.{ 0.0, 0.0, -5.0 }, math.world_forward);
     var uniform: Uniform = undefined;
     // This model matrix converts from the glTF coordinate system to our world
@@ -659,8 +621,9 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .texture_bind_group = texture_bind_group,
 
         .depth_format = depth_format,
-        .depth_texture = depth_texture,
-        .depth_texture_view = depth_texture_view,
+        // Deferred to Engine.createSwapChain.
+        .depth_texture = null,
+        .depth_texture_view = null,
 
         .imgui_context = imgui_context,
         .imgui_io = c.ImGui_GetIO(),
@@ -679,6 +642,8 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .mouse_captured = true,
         .last_mouse_position = mouse_position,
     };
+    // TODO: Can we make it clear what resources need to be valid for createSwapChain?
+    engine.createSwapChain(framebuffer_size.width, framebuffer_size.height);
 
     return engine;
 }
@@ -844,12 +809,7 @@ fn update(self: *Engine, delta_time: f32) void {
     }
 }
 
-// TODO: Deduplicate surface + depth texture creation (here and in init).
-fn recreateSwapChain(self: *Engine, width: u32, height: u32) void {
-    c.wgpuTextureViewRelease(self.depth_texture_view);
-    c.wgpuTextureDestroy(self.depth_texture);
-    c.wgpuTextureRelease(self.depth_texture);
-
+fn createSwapChain(self: *Engine, width: u32, height: u32) void {
     c.wgpuSurfaceConfigure(self.surface, &.{
         .device = self.device,
         .format = self.surface_format,
@@ -889,6 +849,14 @@ fn recreateSwapChain(self: *Engine, width: u32, height: u32) void {
 
     self.depth_texture = depth_texture;
     self.depth_texture_view = depth_texture_view;
+}
+
+fn recreateSwapChain(self: *Engine, width: u32, height: u32) void {
+    c.wgpuTextureViewRelease(self.depth_texture_view);
+    c.wgpuTextureDestroy(self.depth_texture);
+    c.wgpuTextureRelease(self.depth_texture);
+
+    self.createSwapChain(width, height);
 }
 
 // TODO: Not sure I want to do the resizing in here.
