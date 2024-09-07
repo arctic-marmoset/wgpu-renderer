@@ -3,6 +3,8 @@ const std = @import("std");
 const c = @import("c.zig");
 const math = @import("math.zig");
 
+const Engine = @import("Engine.zig");
+
 const Camera = @This();
 
 position: math.Vec3,
@@ -37,14 +39,19 @@ pub const MoveDirection = struct {
     }
 };
 
-pub fn init(position: math.Vec3, target: math.Vec3) Camera {
-    const direction: math.Vec3 = math.vec3Normalize(target - position);
+pub const InitOptions = struct {
+    position: math.Vec3,
+    target: math.Vec3,
+};
+
+pub fn init(options: InitOptions) Camera {
+    const direction: math.Vec3 = math.vec3Normalize(options.target - options.position);
 
     const pitch = std.math.asin(direction[1]);
     const yaw = std.math.atan2(direction[0], direction[2]);
 
     const camera: Camera = .{
-        .position = position,
+        .position = options.position,
         .yaw = yaw,
         .pitch = pitch,
     };
@@ -67,7 +74,7 @@ pub fn translate(self: *Camera, delta_time: f32, move_direction: MoveDirection) 
         self.position += forward * -move_speed_vec3;
     }
 
-    const right = math.vec3CrossNormalize(forward, math.world_up);
+    const right = math.vec3CrossNormalize(forward, Engine.world_space.up.vector());
     if (move_direction.left) {
         changed = true;
         self.position += right * -move_speed_vec3;
@@ -78,10 +85,10 @@ pub fn translate(self: *Camera, delta_time: f32, move_direction: MoveDirection) 
 
     if (move_direction.up) {
         changed = true;
-        self.position += math.world_up * move_speed_vec3;
+        self.position += Engine.world_space.up.vector() * move_speed_vec3;
     } else if (move_direction.down) {
         changed = true;
-        self.position += math.world_up * -move_speed_vec3;
+        self.position += Engine.world_space.up.vector() * -move_speed_vec3;
     }
 }
 
@@ -101,7 +108,7 @@ pub fn computeMatrices(self: Camera) Matrices {
     const target = self.position + forward;
 
     const matrices: Matrices = .{
-        .view = math.lookAt(self.position, target, math.world_up),
+        .view = math.lookAt(self.position, target, Engine.world_space.up.vector()),
     };
 
     return matrices;

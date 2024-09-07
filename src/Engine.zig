@@ -51,6 +51,12 @@ camera: Camera,
 mouse_captured: bool,
 last_mouse_position: math.Vec2,
 
+pub const model_space = math.CoordinateSystem.glTF;
+pub const world_space = math.CoordinateSystem.vulkan;
+// This transform converts from the model space coordinate system to the
+// world space. It should probably be applied to all objects.
+pub const model_transform = math.CoordinateSystem.transform(model_space, world_space);
+
 const Uniform = extern struct {
     model: math.Mat4,
     view: math.Mat4,
@@ -444,35 +450,21 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     defer c.wgpuSamplerRelease(linear_sampler);
 
     const framebuffer_size = glfw.getFramebufferSize(window);
-    const camera = Camera.init(@as(math.Vec3, @splat(0.0)) - math.vec3Scale(math.world_forward, 5.0), math.world_forward);
+    const camera = Camera.init(.{
+        .position = -math.vec3Scale(world_space.forward.vector(), 5.0),
+        .target = world_space.forward.vector(),
+    });
 
-    // This model matrix converts from the glTF coordinate system to our world
-    // space convention. It *must* be applied to all objects. The contents of
-    // the matrix are defined as follows:
-    // [ -1,  0, 0, 0 ] The glTF +X direction corresponds to our -X direction.
-    // [  0, -1, 0, 0 ] The glTF +Y direction corresponds to our -Y direction.
-    // [  0,  0, 1, 0 ] The glTF +Z direction is the same as our +Z direction.
-    // [  0,  0, 0, 1 ]
     // TODO: Figure out where to put this. Should we just init all model
     // matrices like this? Or do we apply this in a post-processing step?
-    // TODO: Any way to compute these (at comptime), based on the glTF axes and
-    // our worldspace axes?
-    // zig fmt: off
-    const model: math.Mat4 = .{
-        .{ -1.0,  0.0, 0.0, 0.0 },
-        .{  0.0, -1.0, 0.0, 0.0 },
-        .{  0.0,  0.0, 1.0, 0.0 },
-        .{  0.0,  0.0, 0.0, 1.0 },
-    };
-    // zig fmt: on
+    const model: math.Mat4 = model_transform;
     // The dragon is kind of small. Scale it up.
     const scale = 10.0;
-    const isotropic_scale: math.Vec3 = @splat(scale);
     const aspect_ratio =
         @as(f32, @floatFromInt(framebuffer_size.width)) / @as(f32, @floatFromInt(framebuffer_size.height));
     const camera_matrices = camera.computeMatrices();
     const uniform: Uniform = .{
-        .model = math.scale(model, isotropic_scale),
+        .model = math.scaleUniform(model, scale),
         .view = camera_matrices.view,
         .proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01),
     };
@@ -610,7 +602,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .renderTargetFormat = surface_format,
         .depthStencilFormat = depth_format,
     })) {
-        return error.WGRInitializeFailed;
+        return error.ImGuiBackendInitializeFailed;
     }
     errdefer c.ImGuiBackendTerminate();
 
@@ -895,7 +887,7 @@ fn onMousePositionChanged(self: *Engine, x: f64, y: f64) void {
     const position: math.Vec2 = .{ @floatCast(x), @floatCast(y) };
     const delta = position - self.last_mouse_position;
     self.last_mouse_position = position;
-    // TODO: This should be in `Engine.update`.
+    // TODO: This should be in `Engine.update`; we don't have `delta_time` here.
     self.camera.updateOrientation(delta);
 }
 

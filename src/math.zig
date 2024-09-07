@@ -2,18 +2,71 @@ const std = @import("std");
 
 const c = @import("c.zig");
 
-// Vulkan clip space coordinate system.
-// zig fmt: off
-pub const world_up:      Vec3 = .{ 0.0, -1.0, 0.0 };
-pub const world_forward: Vec3 = .{ 0.0,  0.0, 1.0 };
-pub const world_right:   Vec3 = .{ 1.0,  0.0, 0.0 };
-// zig fmt: on
+pub const CoordinateSystem = struct {
+    right: Axis,
+    up: Axis,
+    forward: Axis,
+
+    const Axis = struct {
+        name: Name,
+        sign: Sign,
+
+        pub fn vector(self: Axis) Vec3 {
+            var vec = vec3Zero();
+            vec[@intFromEnum(self.name)] = @intFromEnum(self.sign);
+            return vec;
+        }
+
+        const Name = enum(comptime_int) { x, y, z };
+        const Sign = enum(comptime_int) { positive = 1, negative = -1 };
+    };
+
+    pub const blender: CoordinateSystem = .{
+        // zig fmt: off
+        .right   = .{ .name = .x, .sign = .positive },
+        .up      = .{ .name = .z, .sign = .positive },
+        .forward = .{ .name = .y, .sign = .positive },
+        // zig fmt: on
+    };
+
+    pub const vulkan: CoordinateSystem = .{
+        // zig fmt: off
+        .right   = .{ .name = .x, .sign = .positive },
+        .up      = .{ .name = .y, .sign = .negative },
+        .forward = .{ .name = .z, .sign = .positive },
+        // zig fmt: on
+    };
+
+    pub const glTF: CoordinateSystem = .{
+        // zig fmt: off
+        .right   = .{ .name = .x, .sign = .negative },
+        .up      = .{ .name = .y, .sign = .positive },
+        .forward = .{ .name = .z, .sign = .positive },
+        // zig fmt: on
+    };
+
+    pub fn transform(source: CoordinateSystem, target: CoordinateSystem) Mat4 {
+        var mat = mat4Zero();
+        mat[@intFromEnum(target.forward.name)][@intFromEnum(source.forward.name)] =
+            @intFromEnum(source.forward.sign) * @intFromEnum(target.forward.sign);
+        mat[@intFromEnum(target.up.name)][@intFromEnum(source.up.name)] =
+            @intFromEnum(source.up.sign) * @intFromEnum(target.up.sign);
+        mat[@intFromEnum(target.right.name)][@intFromEnum(source.right.name)] =
+            @intFromEnum(source.right.sign) * @intFromEnum(target.right.sign);
+        mat[3][3] = 1.0;
+        return mat;
+    }
+};
 
 pub const Vec2 = @Vector(2, f32);
 pub const Vec3 = @Vector(3, f32);
 pub const Vec4 = @Vector(4, f32);
 
 pub const Mat4 = [4]Vec4;
+
+pub fn vec3Zero() Vec3 {
+    return .{ 0.0, 0.0, 0.0 };
+}
 
 pub fn vec3Dot(a: Vec3, b: Vec3) f32 {
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -56,6 +109,7 @@ pub fn vec3CrossNormalize(a: Vec3, b: Vec3) Vec3 {
     return vec3Normalize(vec3Cross(a, b));
 }
 
+// TODO: Maybe compute this generically for any coordinate system?
 pub fn forwardVectorFromEuler(pitch: f32, yaw: f32) Vec3 {
     const forward = vec3Normalize(.{
         @cos(pitch) * @sin(yaw),
@@ -70,6 +124,15 @@ pub fn vec4Scale(vec: Vec4, factor: f32) Vec4 {
     const factor_vec4: Vec4 = @splat(factor);
     const scaled = vec * factor_vec4;
     return scaled;
+}
+
+pub fn mat4Zero() Mat4 {
+    return .{
+        .{ 0.0, 0.0, 0.0, 0.0 },
+        .{ 0.0, 0.0, 0.0, 0.0 },
+        .{ 0.0, 0.0, 0.0, 0.0 },
+        .{ 0.0, 0.0, 0.0, 0.0 },
+    };
 }
 
 pub fn mat4Identity() Mat4 {
@@ -89,6 +152,12 @@ pub fn scale(mat: Mat4, factor: Vec3) Mat4 {
         mat[3],
     };
 
+    return scaled;
+}
+
+pub fn scaleUniform(mat: Mat4, factor: f32) Mat4 {
+    const factor_vec3: Vec3 = @splat(factor);
+    const scaled = scale(mat, factor_vec3);
     return scaled;
 }
 
