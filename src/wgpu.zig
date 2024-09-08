@@ -139,14 +139,14 @@ pub fn deviceLoadTexture(
         c.VK_FORMAT_BC7_SRGB_BLOCK => c.WGPUTextureFormat_BC7RGBAUnormSrgb,
         else => return error.UnsupportedFormat,
     };
-    const block_size = switch (format) {
+    const block_size: u32 = switch (format) {
         c.WGPUTextureFormat_BC6HRGBFloat,
         c.WGPUTextureFormat_BC6HRGBUfloat,
         c.WGPUTextureFormat_BC7RGBAUnormSrgb,
         => 16,
         else => unreachable,
     };
-    const block_width = switch (format) {
+    const block_width: u32 = switch (format) {
         c.WGPUTextureFormat_BC6HRGBFloat,
         c.WGPUTextureFormat_BC6HRGBUfloat,
         c.WGPUTextureFormat_BC7RGBAUnormSrgb,

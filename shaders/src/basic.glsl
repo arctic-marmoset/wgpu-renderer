@@ -7,4 +7,11 @@
 #define MODEL_SET_INDEX   2
 #define TEXTURE_SET_INDEX 3
 
+layout(std140, set = FRAME_SET_INDEX, binding = 0) uniform Frame
+{
+    mat4 view;
+    mat4 proj;
+    vec3 cameraPosition;
+} uFrame;
+
 #endif

@@ -10,12 +10,6 @@ layout(location = 0) out vec3 outWorldPosition;
 layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec2 outUV;
 
-layout(std140, set = FRAME_SET_INDEX, binding = 0) uniform Frame
-{
-    mat4 view;
-    mat4 proj;
-} uFrame;
-
 layout(std140, set = MODEL_SET_INDEX, binding = 0) uniform Model
 {
     mat4 model;

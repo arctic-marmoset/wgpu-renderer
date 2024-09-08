@@ -42,6 +42,7 @@ default_sampler_bind_group: c.WGPUBindGroup,
 frame: FrameRenderData,
 dragon: ModelRenderData,
 arena: ModelRenderData,
+cube: ModelRenderData,
 
 camera: Camera,
 
@@ -71,6 +72,7 @@ const Vertex = struct {
 const FrameUniform = extern struct {
     view: math.Mat4,
     proj: math.Mat4,
+    camera_position: math.Vec3 align(16),
 };
 
 const ModelUniform = extern struct {
@@ -248,7 +250,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .entryCount = 1,
         .entries = &.{
             .binding = 0,
-            .visibility = c.WGPUShaderStage_Vertex,
+            .visibility = c.WGPUShaderStage_Vertex | c.WGPUShaderStage_Fragment,
             .buffer = .{
                 .type = c.WGPUBufferBindingType_Uniform,
                 .hasDynamicOffset = @intFromBool(false),
@@ -485,6 +487,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         const uniform_data: FrameUniform = .{
             .view = camera_matrices.view,
             .proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01),
+            .camera_position = camera.position,
         };
         const ubo = c.wgpuDeviceCreateBuffer(device, &.{
             .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
@@ -581,6 +584,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         // Deferred to Engine.loadModel.
         .dragon = undefined,
         .arena = undefined,
+        .cube = undefined,
 
         .camera = camera,
 
@@ -590,14 +594,26 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     // TODO: Can we make it clear what resources need to be valid for these post-init functions?
     // Could maybe resolve by factoring out base graphics API resources to GraphicsContext.
     engine.createSwapChain(framebuffer_extent.width, framebuffer_extent.height);
+
+    var translate_scale = math.mat4Identity();
+    var up: c.vec3 = math.vec3Scale(world_space.up.vector(), 0.2);
+    c.glmc_translate(&translate_scale, &up);
     engine.dragon = try engine.loadModel(.{
-        .texture_path = "textures/stanford_dragon_base_bc7.ktx2",
+        .base_texture_path = "textures/stanford_dragon_base_bc7.ktx2",
         .scene_path = "meshes/stanford_dragon.glb",
-        .transform = math.scaleUniform(math.mat4Identity(), 10.0),
+        .transform = math.scaleUniform(translate_scale, 10.0),
     });
     engine.arena = try engine.loadModel(.{
-        .texture_path = "textures/missing_bc7.ktx2",
+        .base_texture_path = "textures/missing_bc7.ktx2",
         .scene_path = "meshes/arena.glb",
+    });
+    var down: c.vec3 = math.vec3Scale(world_space.up.vector(), -0.8);
+    var translate = math.mat4Identity();
+    c.glmc_translate(&translate, &down);
+    engine.cube = try engine.loadModel(.{
+        .base_texture_path = "textures/crate/crate_base_bc7.ktx2",
+        .scene_path = "meshes/cube.glb",
+        .transform = translate,
     });
 
     return engine;
@@ -607,8 +623,10 @@ pub fn deinit(self: *Engine) void {
     c.ImGuiBackendTerminate();
     c.ImGui_DestroyContext(self.imgui_context);
 
+    self.cube.deinit();
     self.arena.deinit();
     self.dragon.deinit();
+
     self.frame.deinit();
 
     c.wgpuBindGroupRelease(self.default_sampler_bind_group);
@@ -640,7 +658,7 @@ pub fn run(self: *Engine) !void {
 }
 
 const LoadModelOptions = struct {
-    texture_path: []const u8,
+    base_texture_path: []const u8,
     scene_path: []const u8,
     transform: math.Mat4 = math.mat4Identity(),
 };
@@ -665,39 +683,8 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     c.wgpuQueueWriteBuffer(self.queue, ubo, 0, &uniform_data, @sizeOf(@TypeOf(uniform_data)));
 
     // TODO: Do tonemapping so HDR textures look ok with SDR display.
-    const texture_data = try self.data_dir.readFileAlloc(
-        self.allocator,
-        options.texture_path,
-        512 * 1024 * 1024,
-    );
-    defer self.allocator.free(texture_data);
-    var ktx_texture: ?*c.ktxTexture2 = null;
-    if (c.ktxTexture2_CreateFromMemory(
-        texture_data.ptr,
-        @intCast(texture_data.len),
-        c.KTX_TEXTURE_CREATE_NO_FLAGS,
-        &ktx_texture,
-    ) != c.KTX_SUCCESS) {
-        return error.CreateKtxTextureFailed;
-    }
-    defer c.ktxTexture2_Destroy(ktx_texture);
-    const texture, const texture_format = try wgpu.deviceLoadTexture(
-        self.device,
-        self.queue,
-        ktx_texture.?,
-    );
-    defer c.wgpuTextureRelease(texture);
-    errdefer c.wgpuTextureDestroy(texture);
-    const albedo_texture_view = c.wgpuTextureCreateView(texture, &.{
-        .format = texture_format,
-        .dimension = c.WGPUTextureViewDimension_2D,
-        .baseMipLevel = 0,
-        .mipLevelCount = ktx_texture.?.numLevels,
-        .baseArrayLayer = 0,
-        .arrayLayerCount = ktx_texture.?.numLayers,
-        .aspect = c.WGPUTextureAspect_All,
-    });
-    defer c.wgpuTextureViewRelease(albedo_texture_view);
+    const base = try self.loadTexture(options.base_texture_path);
+    defer c.wgpuTextureViewRelease(base);
 
     // TODO: Maybe factor this out into a separate function.
     const scene_data = try self.data_dir.readFileAllocOptions(
@@ -709,6 +696,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
         null,
     );
     defer self.allocator.free(scene_data);
+
     var gltf = Gltf.init(self.allocator);
     defer gltf.deinit();
     try gltf.parse(scene_data);
@@ -732,6 +720,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
             }
         }
     }
+
     const vertices = try self.allocator.alloc(Vertex, vertex_count);
     defer self.allocator.free(vertices);
     const indices = try self.allocator.alloc(u32, index_count);
@@ -781,6 +770,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
             indices[index_cursor] = index[0];
         }
     }
+
     const vbo_content_size = mem.sizeOfElements(vertices);
     const vbo = c.wgpuDeviceCreateBuffer(self.device, &.{
         .usage = c.WGPUBufferUsage_Vertex | c.WGPUBufferUsage_CopyDst,
@@ -789,6 +779,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     errdefer c.wgpuBufferRelease(vbo);
     errdefer c.wgpuBufferDestroy(vbo);
     c.wgpuQueueWriteBuffer(self.queue, vbo, 0, vertices.ptr, vbo_content_size);
+
     const ibo_content_size = mem.sizeOfElements(indices);
     const ibo = c.wgpuDeviceCreateBuffer(self.device, &.{
         .usage = c.WGPUBufferUsage_Index | c.WGPUBufferUsage_CopyDst,
@@ -809,7 +800,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     errdefer c.wgpuBindGroupRelease(uniform_bind_group);
 
     const texture_bind_group_entries: []const c.WGPUBindGroupEntry = &.{
-        .{ .binding = 0, .textureView = albedo_texture_view },
+        .{ .binding = 0, .textureView = base },
     };
     const texture_bind_group = c.wgpuDeviceCreateBindGroup(self.device, &.{
         .layout = self.texture_bind_group_layout,
@@ -829,6 +820,47 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
         .uniform_bind_group = uniform_bind_group,
         .texture_bind_group = texture_bind_group,
     };
+}
+
+fn loadTexture(self: *Engine, path: []const u8) !c.WGPUTextureView {
+    const texture_data = try self.data_dir.readFileAlloc(
+        self.allocator,
+        path,
+        512 * 1024 * 1024,
+    );
+    defer self.allocator.free(texture_data);
+
+    var ktx_texture: ?*c.ktxTexture2 = null;
+    if (c.ktxTexture2_CreateFromMemory(
+        texture_data.ptr,
+        @intCast(texture_data.len),
+        c.KTX_TEXTURE_CREATE_NO_FLAGS,
+        &ktx_texture,
+    ) != c.KTX_SUCCESS) {
+        return error.CreateKtxTextureFailed;
+    }
+    defer c.ktxTexture2_Destroy(ktx_texture);
+
+    const texture, const texture_format = try wgpu.deviceLoadTexture(
+        self.device,
+        self.queue,
+        ktx_texture.?,
+    );
+    defer c.wgpuTextureRelease(texture);
+    errdefer c.wgpuTextureDestroy(texture);
+
+    const texture_view = c.wgpuTextureCreateView(texture, &.{
+        .format = texture_format,
+        .dimension = c.WGPUTextureViewDimension_2D,
+        .baseMipLevel = 0,
+        .mipLevelCount = ktx_texture.?.numLevels,
+        .baseArrayLayer = 0,
+        .arrayLayerCount = ktx_texture.?.numLayers,
+        .aspect = c.WGPUTextureAspect_All,
+    });
+    errdefer c.wgpuTextureViewRelease(texture_view);
+
+    return texture_view;
 }
 
 fn tick(self: *Engine) void {
@@ -953,7 +985,7 @@ fn renderFrame(self: *Engine, delta_time: f32) void {
         0,
         null,
     );
-    inline for (.{ self.dragon, self.arena }) |model| {
+    inline for (.{ self.dragon, self.arena, self.cube }) |model| {
         c.wgpuRenderPassEncoderSetBindGroup(
             render_pass,
             @intFromEnum(SetIndex.model),
@@ -1020,6 +1052,7 @@ fn update(self: *Engine, delta_time: f32) void {
         self.camera.translate(delta_time, move_direction);
         const camera_matrices = self.camera.computeMatrices();
         self.frame.uniform_data.view = camera_matrices.view;
+        self.frame.uniform_data.camera_position = self.camera.position;
         c.wgpuQueueWriteBuffer(self.queue, self.frame.ubo, 0, &self.frame.uniform_data, @sizeOf(FrameUniform));
     }
 }
