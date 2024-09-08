@@ -43,6 +43,7 @@ zig build
 
 # Third-Party
 
+- [cglm](https://github.com/recp/cglm)
 - [GLFW (ported to Zig build system)](https://github.com/slimsag/glfw)
 - [imgui](https://github.com/ocornut/imgui)
     - C bindings provided by [dear_bindings](https://github.com/dearimgui/dear_bindings)

@@ -29,6 +29,11 @@ pub fn build(b: *std.Build) !void {
         break :blk overridden;
     };
 
+    const cglm = b.dependency("cglm", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const glfw = b.dependency("glfw", .{
         .target = target,
         .optimize = optimize,
@@ -91,6 +96,7 @@ pub fn build(b: *std.Build) !void {
     exe.addIncludePath(b.path("extern/dear_bindings"));
     exe.addIncludePath(b.path("src"));
     exe.root_module.addImport("zgltf", zgltf.module("zgltf"));
+    exe.linkLibrary(cglm.artifact("cglm"));
     exe.linkLibrary(glfw.artifact("glfw"));
     exe.linkLibrary(ktx.artifact("ktx"));
     exe.linkLibrary(wgpu.artifact("wgpu_native"));
