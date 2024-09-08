@@ -63,6 +63,7 @@ pub const Vec3 = @Vector(3, f32);
 pub const Vec4 = @Vector(4, f32);
 
 pub const Mat4 = [4]Vec4;
+pub const Mat4x3 = [3]Vec4;
 
 pub fn vec3Zero() Vec3 {
     return .{ 0.0, 0.0, 0.0 };
@@ -142,6 +143,28 @@ pub fn mat4Identity() Mat4 {
         .{ 0.0, 0.0, 1.0, 0.0 },
         .{ 0.0, 0.0, 0.0, 1.0 },
     };
+}
+
+pub fn mat4Mul(a: Mat4, b: Mat4) Mat4 {
+    var product: Mat4 = undefined;
+
+    inline for (0..4) |row| {
+        var vx: Vec4 = @splat(a[row][0]);
+        var vy: Vec4 = @splat(a[row][1]);
+        var vz: Vec4 = @splat(a[row][2]);
+        var vw: Vec4 = @splat(a[row][3]);
+
+        vx = vx * b[0];
+        vy = vy * b[1];
+        vz = vz * b[2];
+        vw = vw * b[3];
+        vx = vx + vz;
+        vy = vy + vw;
+        vx = vx + vy;
+        product[row] = vx;
+    }
+
+    return product;
 }
 
 pub fn scale(mat: Mat4, factor: Vec3) Mat4 {

@@ -3,9 +3,12 @@
 #include "basic.glsl"
 
 layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec2 inUV;
+layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inUV;
 
-layout(location = 0) out vec2 outUV;
+layout(location = 0) out vec3 outWorldPosition;
+layout(location = 1) out vec3 outNormal;
+layout(location = 2) out vec2 outUV;
 
 layout(std140, set = FRAME_SET_INDEX, binding = 0) uniform Frame
 {
@@ -16,6 +19,7 @@ layout(std140, set = FRAME_SET_INDEX, binding = 0) uniform Frame
 layout(std140, set = MODEL_SET_INDEX, binding = 0) uniform Model
 {
     mat4 model;
+    mat3 normal;
 } uModel;
 
 // NOTE: I switched to GLSL because glslc actually inserts a transpose operation
@@ -27,5 +31,7 @@ void main() {
     const vec4 viewPosition = uFrame.view * worldPosition;
     const vec4 clipPosition = uFrame.proj * viewPosition;
     gl_Position = clipPosition;
+    outWorldPosition = worldPosition.xyz;
+    outNormal = uModel.normal * inNormal;
     outUV = inUV;
 }

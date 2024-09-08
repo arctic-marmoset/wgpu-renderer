@@ -64,6 +64,7 @@ const SetIndex = enum(comptime_int) {
 
 const Vertex = struct {
     position: math.Vec3,
+    normal: math.Vec3,
     uv: math.Vec2,
 };
 
@@ -74,6 +75,7 @@ const FrameUniform = extern struct {
 
 const ModelUniform = extern struct {
     model: math.Mat4,
+    normal: math.Mat4x3,
 };
 
 const FrameRenderData = struct {
@@ -88,9 +90,7 @@ const FrameRenderData = struct {
 };
 
 const ModelRenderData = struct {
-    uniform_data: ModelUniform = .{
-        .model = model_transform,
-    },
+    uniform_data: ModelUniform,
     ubo: c.WGPUBuffer,
     vbo: c.WGPUBuffer,
     vbo_content_size: usize,
@@ -488,11 +488,11 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         };
         const ubo = c.wgpuDeviceCreateBuffer(device, &.{
             .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
-            .size = @sizeOf(FrameUniform),
+            .size = @sizeOf(@TypeOf(uniform_data)),
         });
         errdefer c.wgpuBufferRelease(ubo);
         errdefer c.wgpuBufferDestroy(ubo);
-        c.wgpuQueueWriteBuffer(queue, ubo, 0, &uniform_data, @sizeOf(FrameUniform));
+        c.wgpuQueueWriteBuffer(queue, ubo, 0, &uniform_data, @sizeOf(@TypeOf(uniform_data)));
 
         const bind_group = c.wgpuDeviceCreateBindGroup(device, &.{
             .layout = frame_bind_group_layout,
@@ -501,7 +501,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
                 .binding = 0,
                 .buffer = ubo,
                 .offset = 0,
-                .size = @sizeOf(FrameUniform),
+                .size = @sizeOf(@TypeOf(uniform_data)),
             },
         });
         errdefer c.wgpuBindGroupRelease(bind_group);
@@ -593,7 +593,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     engine.dragon = try engine.loadModel(.{
         .texture_path = "textures/stanford_dragon_base_bc7.ktx2",
         .scene_path = "meshes/stanford_dragon.glb",
-        .scale = 10.0,
+        .transform = math.scaleUniform(math.mat4Identity(), 10.0),
     });
     engine.arena = try engine.loadModel(.{
         .texture_path = "textures/missing_bc7.ktx2",
@@ -642,21 +642,27 @@ pub fn run(self: *Engine) !void {
 const LoadModelOptions = struct {
     texture_path: []const u8,
     scene_path: []const u8,
-    // TODO: Implement mat4 mul so we can handle arbitrary transform.
-    scale: f32 = 1.0,
+    transform: math.Mat4 = math.mat4Identity(),
 };
 
 fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
+    var model_matrix = math.mat4Mul(model_transform, options.transform);
+    var model_inv: math.Mat4 = undefined;
+    c.glmc_mat4_inv(&model_matrix, &model_inv);
+    var normal_matrix: math.Mat4 = undefined;
+    c.glmc_mat4_transpose_to(&model_inv, &normal_matrix);
+
     const uniform_data: ModelUniform = .{
-        .model = math.scaleUniform(model_transform, options.scale),
+        .model = model_matrix,
+        .normal = normal_matrix[0..3].*,
     };
     const ubo = c.wgpuDeviceCreateBuffer(self.device, &.{
         .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
-        .size = @sizeOf(ModelUniform),
+        .size = @sizeOf(@TypeOf(uniform_data)),
     });
     errdefer c.wgpuBufferRelease(ubo);
     errdefer c.wgpuBufferDestroy(ubo);
-    c.wgpuQueueWriteBuffer(self.queue, ubo, 0, &uniform_data, @sizeOf(ModelUniform));
+    c.wgpuQueueWriteBuffer(self.queue, ubo, 0, &uniform_data, @sizeOf(@TypeOf(uniform_data)));
 
     // TODO: Do tonemapping so HDR textures look ok with SDR display.
     const texture_data = try self.data_dir.readFileAlloc(
@@ -734,11 +740,15 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     var index_cursor: usize = 0;
     for (gltf_mesh.primitives.items) |primitive| {
         var position_accessor: Gltf.Accessor = undefined;
+        var normal_accessor: Gltf.Accessor = undefined;
         var uv_accessor: Gltf.Accessor = undefined;
         for (primitive.attributes.items) |attribute| {
             switch (attribute) {
                 .position => |index| {
                     position_accessor = gltf.data.accessors.items[index];
+                },
+                .normal => |index| {
+                    normal_accessor = gltf.data.accessors.items[index];
                 },
                 .texcoord => |index| {
                     uv_accessor = gltf.data.accessors.items[index];
@@ -748,14 +758,18 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
         }
 
         std.debug.assert(position_accessor.component_type == .float);
+        std.debug.assert(normal_accessor.component_type == .float);
         std.debug.assert(uv_accessor.component_type == .float);
 
         var position_iter = position_accessor.iterator(f32, gltf, gltf.glb_binary.?);
+        var normal_iter = normal_accessor.iterator(f32, gltf, gltf.glb_binary.?);
         var uv_iter = uv_accessor.iterator(f32, gltf, gltf.glb_binary.?);
         while (position_iter.next()) |position| : (vertex_cursor += 1) {
+            const normal = normal_iter.next().?;
             const uv = uv_iter.next().?;
             vertices[vertex_cursor] = .{
                 .position = position[0..][0..3].*,
+                .normal = normal[0..][0..3].*,
                 .uv = uv[0..][0..2].*,
             };
         }
@@ -789,7 +803,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
         .entryCount = 1,
         .entries = &.{
             .buffer = ubo,
-            .size = @sizeOf(ModelUniform),
+            .size = @sizeOf(@TypeOf(uniform_data)),
         },
     });
     errdefer c.wgpuBindGroupRelease(uniform_bind_group);
@@ -805,6 +819,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     errdefer c.wgpuBindGroupRelease(texture_bind_group);
 
     return .{
+        .uniform_data = uniform_data,
         .ubo = ubo,
         .vbo = vbo,
         .vbo_content_size = vbo_content_size,
