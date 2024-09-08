@@ -39,6 +39,7 @@ imgui_io: *c.ImGuiIO,
 last_instant: std.time.Instant,
 
 default_sampler_bind_group: c.WGPUBindGroup,
+fallback_specular_map: c.WGPUTextureView,
 frame: FrameRenderData,
 dragon: ModelRenderData,
 arena: ModelRenderData,
@@ -286,6 +287,15 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     const texture_bind_group_layout_entries: []const c.WGPUBindGroupLayoutEntry = &.{
         .{
             .binding = 0,
+            .visibility = c.WGPUShaderStage_Fragment,
+            .texture = .{
+                .sampleType = c.WGPUTextureSampleType_Float,
+                .viewDimension = c.WGPUTextureViewDimension_2D,
+                .multisampled = @intFromBool(false),
+            },
+        },
+        .{
+            .binding = 1,
             .visibility = c.WGPUShaderStage_Fragment,
             .texture = .{
                 .sampleType = c.WGPUTextureSampleType_Float,
@@ -581,6 +591,8 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
 
         .default_sampler_bind_group = default_sampler_bind_group,
         .frame = frame,
+        // Deferred to Engine.loadTexture.
+        .fallback_specular_map = undefined,
         // Deferred to Engine.loadModel.
         .dragon = undefined,
         .arena = undefined,
@@ -594,6 +606,8 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     // TODO: Can we make it clear what resources need to be valid for these post-init functions?
     // Could maybe resolve by factoring out base graphics API resources to GraphicsContext.
     engine.createSwapChain(framebuffer_extent.width, framebuffer_extent.height);
+
+    engine.fallback_specular_map = try engine.loadTexture("textures/missing_specular_bc4u.ktx2");
 
     var translate_scale = math.mat4Identity();
     var up: c.vec3 = math.vec3Scale(world_space.up.vector(), 0.2);
@@ -612,6 +626,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     c.glmc_translate(&translate, &down);
     engine.cube = try engine.loadModel(.{
         .base_texture_path = "textures/crate/crate_base_bc7.ktx2",
+        .specular_map_path = "textures/crate/crate_specular_bc4u.ktx2",
         .scene_path = "meshes/cube.glb",
         .transform = translate,
     });
@@ -626,6 +641,7 @@ pub fn deinit(self: *Engine) void {
     self.cube.deinit();
     self.arena.deinit();
     self.dragon.deinit();
+    c.wgpuTextureViewRelease(self.fallback_specular_map);
 
     self.frame.deinit();
 
@@ -659,6 +675,7 @@ pub fn run(self: *Engine) !void {
 
 const LoadModelOptions = struct {
     base_texture_path: []const u8,
+    specular_map_path: ?[]const u8 = null,
     scene_path: []const u8,
     transform: math.Mat4 = math.mat4Identity(),
 };
@@ -685,6 +702,12 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     // TODO: Do tonemapping so HDR textures look ok with SDR display.
     const base = try self.loadTexture(options.base_texture_path);
     defer c.wgpuTextureViewRelease(base);
+
+    var specular: c.WGPUTextureView = null;
+    if (options.specular_map_path) |specular_map_path| {
+        specular = try self.loadTexture(specular_map_path);
+    }
+    defer if (specular) |view| c.wgpuTextureViewRelease(view);
 
     // TODO: Maybe factor this out into a separate function.
     const scene_data = try self.data_dir.readFileAllocOptions(
@@ -801,6 +824,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
 
     const texture_bind_group_entries: []const c.WGPUBindGroupEntry = &.{
         .{ .binding = 0, .textureView = base },
+        .{ .binding = 1, .textureView = specular orelse self.fallback_specular_map },
     };
     const texture_bind_group = c.wgpuDeviceCreateBindGroup(self.device, &.{
         .layout = self.texture_bind_group_layout,

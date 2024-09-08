@@ -18,11 +18,12 @@ dependencies to cross-compile cleanly.)
 - Reversed Z buffer with infinite far plane
 - glTF binary meshes
 - KTX2 textures
-    - BC7 (SDR)
-    - BC6H (HDR)
+    - BC7 (SDR base color)
+    - BC6H (HDR base color)
+    - BC4u (monochrome)
 
 ## Preview
-![2024-08-31 Stanford Dragon (glTF binary model, KTX2 base texture)](docs/media/2024-08-31_hello_dragon.jpg)
+![2024-08-31 Specular Mapping](docs/media/2024-09-08_specular_map.jpg)
 
 # Development
 

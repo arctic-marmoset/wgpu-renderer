@@ -11,11 +11,11 @@ layout(location = 0) out vec4 outColor;
 layout(set = SAMPLER_SET_INDEX, binding = 0) uniform sampler uLinearSampler;
 
 layout(set = TEXTURE_SET_INDEX, binding = 0) uniform texture2D uAlbedo;
+layout(set = TEXTURE_SET_INDEX, binding = 1) uniform texture2D uSpecular;
 
 const vec3 kLightColor = vec3(0.86, 0.65, 0.35);
 const vec3 kLightDirection = normalize(vec3(1.0, -1.0, 1.0));
 const float kAmbientAmount = 0.1;
-const float kSpecularAmount = 0.5;
 
 void main() {
     const vec3 albedoColor = texture(sampler2D(uAlbedo, uLinearSampler), inUV).rgb;
@@ -28,7 +28,8 @@ void main() {
     const vec3 diffuseLight = diffuseAmount * kLightColor;
 
     const vec3 reflectDirection = reflect(-kLightDirection, worldNormal);
-    const float specularLight = kSpecularAmount * pow(max(0.0, dot(cameraDirection, reflectDirection)), 32.0);
+    const float specularAmount = texture(sampler2D(uSpecular, uLinearSampler), inUV).r;
+    const float specularLight = specularAmount * pow(max(0.0, dot(cameraDirection, reflectDirection)), 32.0);
 
     const vec3 color =
         (ambientLight + diffuseLight) * albedoColor +

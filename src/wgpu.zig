@@ -134,12 +134,15 @@ pub fn deviceLoadTexture(
 ) !struct { c.WGPUTexture, c.WGPUTextureFormat } {
     // NOTE: Must declare type otherwise compilation fails on macOS.
     const format: c.WGPUTextureFormat = switch (ktx_texture.vkFormat) {
+        c.VK_FORMAT_BC4_UNORM_BLOCK => c.WGPUTextureFormat_BC4RUnorm,
         c.VK_FORMAT_BC6H_SFLOAT_BLOCK => c.WGPUTextureFormat_BC6HRGBFloat,
         c.VK_FORMAT_BC6H_UFLOAT_BLOCK => c.WGPUTextureFormat_BC6HRGBUfloat,
         c.VK_FORMAT_BC7_SRGB_BLOCK => c.WGPUTextureFormat_BC7RGBAUnormSrgb,
         else => return error.UnsupportedFormat,
     };
     const block_size: u32 = switch (format) {
+        c.WGPUTextureFormat_BC4RUnorm,
+        => 8,
         c.WGPUTextureFormat_BC6HRGBFloat,
         c.WGPUTextureFormat_BC6HRGBUfloat,
         c.WGPUTextureFormat_BC7RGBAUnormSrgb,
@@ -147,6 +150,7 @@ pub fn deviceLoadTexture(
         else => unreachable,
     };
     const block_width: u32 = switch (format) {
+        c.WGPUTextureFormat_BC4RUnorm,
         c.WGPUTextureFormat_BC6HRGBFloat,
         c.WGPUTextureFormat_BC6HRGBUfloat,
         c.WGPUTextureFormat_BC7RGBAUnormSrgb,
