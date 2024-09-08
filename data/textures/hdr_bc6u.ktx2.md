@@ -1,4 +1,4 @@
-# hdr.ktx2
+# hdr_bc6u.ktx2
 
 For some reason, having mipmaps in textures larger than some size (64x64?)
 causes loading to fail with KTX_FILE_DATA_ERROR because of an unexpected mip
