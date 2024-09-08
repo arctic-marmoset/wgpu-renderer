@@ -1,25 +1,31 @@
 #version 460 core
 
+#include "basic.glsl"
+
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inUV;
 
 layout(location = 0) out vec2 outUV;
 
-layout(std140, set = 0, binding = 0) uniform Ubo
+layout(std140, set = FRAME_SET_INDEX, binding = 0) uniform Frame
 {
-    mat4 model;
     mat4 view;
     mat4 proj;
-} ubo;
+} uFrame;
+
+layout(std140, set = MODEL_SET_INDEX, binding = 0) uniform Model
+{
+    mat4 model;
+} uModel;
 
 // NOTE: I switched to GLSL because glslc actually inserts a transpose operation
 // for matrix multiplications in HLSL and stuff wasn't rendering on the screen.
 // I might switch back to HLSL when I figure out how to prevent that.
 void main() {
     const vec4 modelPosition = vec4(inPosition, 1.0);
-    const vec4 worldPosition = ubo.model * modelPosition;
-    const vec4 viewPosition = ubo.view * worldPosition;
-    const vec4 clipPosition = ubo.proj * viewPosition;
+    const vec4 worldPosition = uModel.model * modelPosition;
+    const vec4 viewPosition = uFrame.view * worldPosition;
+    const vec4 clipPosition = uFrame.proj * viewPosition;
     gl_Position = clipPosition;
     outUV = inUV;
 }

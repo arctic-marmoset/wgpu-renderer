@@ -26,9 +26,9 @@ instance: c.WGPUInstance,
 device: c.WGPUDevice,
 queue: c.WGPUQueue,
 
+model_bind_group_layout: c.WGPUBindGroupLayout,
+texture_bind_group_layout: c.WGPUBindGroupLayout,
 pipeline: c.WGPURenderPipeline,
-mvp_bind_group: c.WGPUBindGroup,
-texture_bind_group: c.WGPUBindGroup,
 
 depth_format: c.WGPUTextureFormat,
 depth_texture: c.WGPUTexture,
@@ -38,13 +38,10 @@ imgui_context: *c.ImGuiContext,
 imgui_io: *c.ImGuiIO,
 last_instant: std.time.Instant,
 
-uniform: Uniform,
-uniform_buffer: c.WGPUBuffer,
-vbo: c.WGPUBuffer,
-vbo_content_size: usize,
-ibo: c.WGPUBuffer,
-ibo_content_size: usize,
-index_count: usize,
+default_sampler_bind_group: c.WGPUBindGroup,
+frame: FrameRenderData,
+dragon: ModelRenderData,
+arena: ModelRenderData,
 
 camera: Camera,
 
@@ -57,10 +54,62 @@ pub const world_space = math.CoordinateSystem.vulkan;
 // world space. It should probably be applied to all objects.
 pub const model_transform = math.CoordinateSystem.transform(model_space, world_space);
 
-const Uniform = extern struct {
-    model: math.Mat4,
+// TODO: Move these to build.zig and pass them to buildShaders.
+const SetIndex = enum(comptime_int) {
+    frame,
+    sampler,
+    model,
+    texture,
+};
+
+const Vertex = struct {
+    position: math.Vec3,
+    uv: math.Vec2,
+};
+
+const FrameUniform = extern struct {
     view: math.Mat4,
     proj: math.Mat4,
+};
+
+const ModelUniform = extern struct {
+    model: math.Mat4,
+};
+
+const FrameRenderData = struct {
+    uniform_data: FrameUniform,
+    ubo: c.WGPUBuffer,
+    bind_group: c.WGPUBindGroup,
+
+    pub fn deinit(self: FrameRenderData) void {
+        c.wgpuBindGroupRelease(self.bind_group);
+        c.wgpuBufferRelease(self.ubo);
+    }
+};
+
+const ModelRenderData = struct {
+    uniform_data: ModelUniform = .{
+        .model = model_transform,
+    },
+    ubo: c.WGPUBuffer,
+    vbo: c.WGPUBuffer,
+    vbo_content_size: usize,
+    ibo: c.WGPUBuffer,
+    ibo_content_size: usize,
+    index_count: usize,
+    uniform_bind_group: c.WGPUBindGroup,
+    texture_bind_group: c.WGPUBindGroup,
+
+    pub fn deinit(self: ModelRenderData) void {
+        c.wgpuBindGroupRelease(self.texture_bind_group);
+        c.wgpuBindGroupRelease(self.uniform_bind_group);
+        c.wgpuBufferDestroy(self.ibo);
+        c.wgpuBufferRelease(self.ibo);
+        c.wgpuBufferDestroy(self.vbo);
+        c.wgpuBufferRelease(self.vbo);
+        c.wgpuBufferDestroy(self.ubo);
+        c.wgpuBufferRelease(self.ubo);
+    }
 };
 
 // Heap allocating lets us freely pass the pointer to callbacks.
@@ -195,7 +244,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     const queue = c.wgpuDeviceGetQueue(device);
     errdefer c.wgpuQueueRelease(queue);
 
-    const mvp_bind_group_layout = c.wgpuDeviceCreateBindGroupLayout(device, &.{
+    const frame_bind_group_layout = c.wgpuDeviceCreateBindGroupLayout(device, &.{
         .entryCount = 1,
         .entries = &.{
             .binding = 0,
@@ -203,21 +252,38 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
             .buffer = .{
                 .type = c.WGPUBufferBindingType_Uniform,
                 .hasDynamicOffset = @intFromBool(false),
-                .minBindingSize = @sizeOf(Uniform),
+                .minBindingSize = @sizeOf(FrameUniform),
             },
         },
     });
-    defer c.wgpuBindGroupLayoutRelease(mvp_bind_group_layout);
-    const texture_bind_group_layout_entries: []const c.WGPUBindGroupLayoutEntry = &.{
-        .{
+    defer c.wgpuBindGroupLayoutRelease(frame_bind_group_layout);
+    const sampler_bind_group_layout = c.wgpuDeviceCreateBindGroupLayout(device, &.{
+        .entryCount = 1,
+        .entries = &.{
             .binding = 0,
             .visibility = c.WGPUShaderStage_Fragment,
             .sampler = .{
                 .type = c.WGPUSamplerBindingType_Filtering,
             },
         },
+    });
+    defer c.wgpuBindGroupLayoutRelease(sampler_bind_group_layout);
+    const model_bind_group_layout = c.wgpuDeviceCreateBindGroupLayout(device, &.{
+        .entryCount = 1,
+        .entries = &.{
+            .binding = 0,
+            .visibility = c.WGPUShaderStage_Vertex,
+            .buffer = .{
+                .type = c.WGPUBufferBindingType_Uniform,
+                .hasDynamicOffset = @intFromBool(false),
+                .minBindingSize = @sizeOf(ModelUniform),
+            },
+        },
+    });
+    errdefer c.wgpuBindGroupLayoutRelease(model_bind_group_layout);
+    const texture_bind_group_layout_entries: []const c.WGPUBindGroupLayoutEntry = &.{
         .{
-            .binding = 1,
+            .binding = 0,
             .visibility = c.WGPUShaderStage_Fragment,
             .texture = .{
                 .sampleType = c.WGPUTextureSampleType_Float,
@@ -230,10 +296,12 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .entryCount = @intCast(texture_bind_group_layout_entries.len),
         .entries = texture_bind_group_layout_entries.ptr,
     });
-    defer c.wgpuBindGroupLayoutRelease(texture_bind_group_layout);
+    errdefer c.wgpuBindGroupLayoutRelease(texture_bind_group_layout);
 
     const bind_group_layouts: []const c.WGPUBindGroupLayout = &.{
-        mvp_bind_group_layout,
+        frame_bind_group_layout,
+        sampler_bind_group_layout,
+        model_bind_group_layout,
         texture_bind_group_layout,
     };
     const pipeline_layout = c.wgpuDeviceCreatePipelineLayout(device, &.{
@@ -327,7 +395,6 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     ) orelse c.WGPUPresentMode_Fifo;
     std.log.debug("selected present mode: {s}", .{wgpu.presentModeToString(present_mode)});
 
-    const Vertex = struct { position: math.Vec3, uv: math.Vec2 };
     const vertex_attributes = wgpu.vertexAttributesFromType(Vertex, .{});
 
     // Must declare type otherwise compilation fails on macOS with:
@@ -404,37 +471,48 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     });
     errdefer c.wgpuRenderPipelineRelease(pipeline);
 
-    // TODO: Do tonemapping so HDR textures look ok with SDR display.
-    const model_texture_data = try data_dir.readFileAlloc(
-        allocator,
-        "textures/stanford_dragon_base_bc7.ktx2",
-        512 * 1024 * 1024,
-    );
-    defer allocator.free(model_texture_data);
-    var model_ktx_texture: ?*c.ktxTexture2 = null;
-    if (c.ktxTexture2_CreateFromMemory(
-        model_texture_data.ptr,
-        @intCast(model_texture_data.len),
-        c.KTX_TEXTURE_CREATE_NO_FLAGS,
-        &model_ktx_texture,
-    ) != c.KTX_SUCCESS) {
-        return error.CreateKtxTextureFailed;
-    }
-    const model_texture, const model_texture_format = try wgpu.deviceLoadTexture(
-        device,
-        queue,
-        model_ktx_texture.?,
-    );
-    const model_texture_view = c.wgpuTextureCreateView(model_texture, &.{
-        .format = model_texture_format,
-        .dimension = c.WGPUTextureViewDimension_2D,
-        .baseMipLevel = 0,
-        .mipLevelCount = model_ktx_texture.?.numLevels,
-        .baseArrayLayer = 0,
-        .arrayLayerCount = model_ktx_texture.?.numLayers,
-        .aspect = c.WGPUTextureAspect_All,
+    const framebuffer_extent = glfw.getFramebufferSize(window);
+
+    const camera = Camera.init(.{
+        .position = -math.vec3Scale(world_space.forward.vector(), 5.0),
+        .target = world_space.forward.vector(),
     });
-    defer c.wgpuTextureViewRelease(model_texture_view);
+
+    const frame: FrameRenderData = blk: {
+        const aspect_ratio = framebuffer_extent.aspectRatio();
+
+        const camera_matrices = camera.computeMatrices();
+        const uniform_data: FrameUniform = .{
+            .view = camera_matrices.view,
+            .proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01),
+        };
+        const ubo = c.wgpuDeviceCreateBuffer(device, &.{
+            .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
+            .size = @sizeOf(FrameUniform),
+        });
+        errdefer c.wgpuBufferRelease(ubo);
+        errdefer c.wgpuBufferDestroy(ubo);
+        c.wgpuQueueWriteBuffer(queue, ubo, 0, &uniform_data, @sizeOf(FrameUniform));
+
+        const bind_group = c.wgpuDeviceCreateBindGroup(device, &.{
+            .layout = frame_bind_group_layout,
+            .entryCount = 1,
+            .entries = &.{
+                .binding = 0,
+                .buffer = ubo,
+                .offset = 0,
+                .size = @sizeOf(FrameUniform),
+            },
+        });
+        errdefer c.wgpuBindGroupRelease(bind_group);
+
+        break :blk .{
+            .uniform_data = uniform_data,
+            .ubo = ubo,
+            .bind_group = bind_group,
+        };
+    };
+    errdefer frame.deinit();
 
     const linear_sampler = c.wgpuDeviceCreateSampler(device, &.{
         .addressModeU = c.WGPUAddressMode_Repeat,
@@ -449,150 +527,15 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     });
     defer c.wgpuSamplerRelease(linear_sampler);
 
-    const framebuffer_size = glfw.getFramebufferSize(window);
-    const camera = Camera.init(.{
-        .position = -math.vec3Scale(world_space.forward.vector(), 5.0),
-        .target = world_space.forward.vector(),
-    });
-
-    // TODO: Figure out where to put this. Should we just init all model
-    // matrices like this? Or do we apply this in a post-processing step?
-    const model: math.Mat4 = model_transform;
-    // The dragon is kind of small. Scale it up.
-    const scale = 10.0;
-    const aspect_ratio =
-        @as(f32, @floatFromInt(framebuffer_size.width)) / @as(f32, @floatFromInt(framebuffer_size.height));
-    const camera_matrices = camera.computeMatrices();
-    const uniform: Uniform = .{
-        .model = math.scaleUniform(model, scale),
-        .view = camera_matrices.view,
-        .proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01),
-    };
-    const uniform_buffer = c.wgpuDeviceCreateBuffer(device, &.{
-        .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
-        .size = @sizeOf(Uniform),
-    });
-    errdefer c.wgpuBufferRelease(uniform_buffer);
-    errdefer c.wgpuBufferDestroy(uniform_buffer);
-    c.wgpuQueueWriteBuffer(queue, uniform_buffer, 0, &uniform, @sizeOf(Uniform));
-    const mvp_bind_group = c.wgpuDeviceCreateBindGroup(device, &.{
-        .layout = mvp_bind_group_layout,
+    const default_sampler_bind_group = c.wgpuDeviceCreateBindGroup(device, &.{
+        .layout = sampler_bind_group_layout,
         .entryCount = 1,
         .entries = &.{
             .binding = 0,
-            .buffer = uniform_buffer,
-            .offset = 0,
-            .size = @sizeOf(Uniform),
-        },
-    });
-    errdefer c.wgpuBindGroupRelease(mvp_bind_group);
-    const texture_bind_group_entries: []const c.WGPUBindGroupEntry = &.{
-        .{
-            .binding = 0,
             .sampler = linear_sampler,
         },
-        .{
-            .binding = 1,
-            .textureView = model_texture_view,
-        },
-    };
-    const texture_bind_group = c.wgpuDeviceCreateBindGroup(device, &.{
-        .layout = texture_bind_group_layout,
-        .entryCount = @intCast(texture_bind_group_entries.len),
-        .entries = texture_bind_group_entries.ptr,
     });
-    errdefer c.wgpuBindGroupRelease(texture_bind_group);
-
-    // TODO: Maybe factor this out into a separate function.
-    const model_data = try data_dir.readFileAllocOptions(
-        allocator,
-        "meshes/stanford_dragon.glb",
-        4 * 1024 * 1024,
-        null,
-        @alignOf(u32),
-        null,
-    );
-    defer allocator.free(model_data);
-    var gltf_model = Gltf.init(allocator);
-    defer gltf_model.deinit();
-    try gltf_model.parse(model_data);
-    const gltf_scene_index = gltf_model.data.scene.?;
-    const gltf_scene = gltf_model.data.scenes.items[gltf_scene_index];
-    const gltf_node_index = gltf_scene.nodes.?.items[0];
-    const gltf_node = gltf_model.data.nodes.items[gltf_node_index];
-    const gltf_mesh_index = gltf_node.mesh.?;
-    const gltf_mesh = gltf_model.data.meshes.items[gltf_mesh_index];
-    var vertex_count: usize = 0;
-    var index_count: usize = 0;
-    for (gltf_mesh.primitives.items) |primitive| {
-        index_count += @intCast(gltf_model.data.accessors.items[primitive.indices.?].count);
-        for (primitive.attributes.items) |attribute| {
-            switch (attribute) {
-                .position => |index| {
-                    vertex_count += @intCast(gltf_model.data.accessors.items[index].count);
-                    break;
-                },
-                else => {},
-            }
-        }
-    }
-    const vertices = try allocator.alloc(Vertex, vertex_count);
-    defer allocator.free(vertices);
-    const indices = try allocator.alloc(u32, index_count);
-    defer allocator.free(indices);
-    var vertex_cursor: usize = 0;
-    var index_cursor: usize = 0;
-    for (gltf_mesh.primitives.items) |primitive| {
-        var position_accessor: Gltf.Accessor = undefined;
-        var uv_accessor: Gltf.Accessor = undefined;
-        for (primitive.attributes.items) |attribute| {
-            switch (attribute) {
-                .position => |index| {
-                    position_accessor = gltf_model.data.accessors.items[index];
-                },
-                .texcoord => |index| {
-                    uv_accessor = gltf_model.data.accessors.items[index];
-                },
-                else => {},
-            }
-        }
-
-        std.debug.assert(position_accessor.component_type == .float);
-        std.debug.assert(uv_accessor.component_type == .float);
-
-        var position_iter = position_accessor.iterator(f32, gltf_model, gltf_model.glb_binary.?);
-        var uv_iter = uv_accessor.iterator(f32, gltf_model, gltf_model.glb_binary.?);
-        while (position_iter.next()) |position| : (vertex_cursor += 1) {
-            const uv = uv_iter.next().?;
-            vertices[vertex_cursor] = .{
-                .position = position[0..][0..3].*,
-                .uv = uv[0..][0..2].*,
-            };
-        }
-
-        const index_accessor = gltf_model.data.accessors.items[primitive.indices.?];
-        std.debug.assert(index_accessor.component_type == .unsigned_short);
-        var index_iter = index_accessor.iterator(u16, gltf_model, gltf_model.glb_binary.?);
-        while (index_iter.next()) |index| : (index_cursor += 1) {
-            indices[index_cursor] = index[0];
-        }
-    }
-    const vbo_content_size = mem.sizeOfElements(vertices);
-    const vbo = c.wgpuDeviceCreateBuffer(device, &.{
-        .usage = c.WGPUBufferUsage_Vertex | c.WGPUBufferUsage_CopyDst,
-        .size = vbo_content_size,
-    });
-    errdefer c.wgpuBufferRelease(vbo);
-    errdefer c.wgpuBufferDestroy(vbo);
-    c.wgpuQueueWriteBuffer(queue, vbo, 0, vertices.ptr, vbo_content_size);
-    const ibo_content_size = mem.sizeOfElements(indices);
-    const ibo = c.wgpuDeviceCreateBuffer(device, &.{
-        .usage = c.WGPUBufferUsage_Index | c.WGPUBufferUsage_CopyDst,
-        .size = ibo_content_size,
-    });
-    errdefer c.wgpuBufferRelease(ibo);
-    errdefer c.wgpuBufferDestroy(ibo);
-    c.wgpuQueueWriteBuffer(queue, ibo, 0, indices.ptr, ibo_content_size);
+    errdefer c.wgpuBindGroupRelease(default_sampler_bind_group);
 
     const imgui_context = c.ImGui_CreateContext(null) orelse return error.ImGuiCreateContextFailed;
     errdefer c.ImGui_DestroyContext(imgui_context);
@@ -620,9 +563,9 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .device = device,
         .queue = queue,
 
+        .model_bind_group_layout = model_bind_group_layout,
+        .texture_bind_group_layout = texture_bind_group_layout,
         .pipeline = pipeline,
-        .mvp_bind_group = mvp_bind_group,
-        .texture_bind_group = texture_bind_group,
 
         .depth_format = depth_format,
         // Deferred to Engine.createSwapChain.
@@ -633,21 +576,29 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .imgui_io = c.ImGui_GetIO(),
         .last_instant = std.time.Instant.now() catch unreachable,
 
-        .uniform = uniform,
-        .uniform_buffer = uniform_buffer,
-        .vbo = vbo,
-        .vbo_content_size = vbo_content_size,
-        .ibo = ibo,
-        .ibo_content_size = ibo_content_size,
-        .index_count = index_count,
+        .default_sampler_bind_group = default_sampler_bind_group,
+        .frame = frame,
+        // Deferred to Engine.loadModel.
+        .dragon = undefined,
+        .arena = undefined,
 
         .camera = camera,
 
         .mouse_captured = true,
         .last_mouse_position = mouse_position,
     };
-    // TODO: Can we make it clear what resources need to be valid for createSwapChain?
-    engine.createSwapChain(framebuffer_size.width, framebuffer_size.height);
+    // TODO: Can we make it clear what resources need to be valid for these post-init functions?
+    // Could maybe resolve by factoring out base graphics API resources to GraphicsContext.
+    engine.createSwapChain(framebuffer_extent.width, framebuffer_extent.height);
+    engine.dragon = try engine.loadModel(.{
+        .texture_path = "textures/stanford_dragon_base_bc7.ktx2",
+        .scene_path = "meshes/stanford_dragon.glb",
+        .scale = 10.0,
+    });
+    engine.arena = try engine.loadModel(.{
+        .texture_path = "textures/missing_bc7.ktx2",
+        .scene_path = "meshes/arena.glb",
+    });
 
     return engine;
 }
@@ -656,21 +607,20 @@ pub fn deinit(self: *Engine) void {
     c.ImGuiBackendTerminate();
     c.ImGui_DestroyContext(self.imgui_context);
 
-    c.wgpuBufferDestroy(self.uniform_buffer);
-    c.wgpuBufferRelease(self.uniform_buffer);
-    c.wgpuBufferDestroy(self.vbo);
-    c.wgpuBufferRelease(self.vbo);
-    c.wgpuBufferDestroy(self.ibo);
-    c.wgpuBufferRelease(self.ibo);
+    self.arena.deinit();
+    self.dragon.deinit();
+    self.frame.deinit();
+
+    c.wgpuBindGroupRelease(self.default_sampler_bind_group);
 
     c.wgpuTextureViewRelease(self.depth_texture_view);
     c.wgpuTextureDestroy(self.depth_texture);
     c.wgpuTextureRelease(self.depth_texture);
 
-    c.wgpuBindGroupRelease(self.mvp_bind_group);
-    c.wgpuBindGroupRelease(self.texture_bind_group);
-
     c.wgpuRenderPipelineRelease(self.pipeline);
+    c.wgpuBindGroupLayoutRelease(self.texture_bind_group_layout);
+    c.wgpuBindGroupLayoutRelease(self.model_bind_group_layout);
+
     c.wgpuQueueRelease(self.queue);
     c.wgpuDeviceRelease(self.device);
     c.wgpuSurfaceUnconfigure(self.surface);
@@ -687,6 +637,183 @@ pub fn run(self: *Engine) !void {
         c.glfwPollEvents();
         self.tick();
     }
+}
+
+const LoadModelOptions = struct {
+    texture_path: []const u8,
+    scene_path: []const u8,
+    // TODO: Implement mat4 mul so we can handle arbitrary transform.
+    scale: f32 = 1.0,
+};
+
+fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
+    const uniform_data: ModelUniform = .{
+        .model = math.scaleUniform(model_transform, options.scale),
+    };
+    const ubo = c.wgpuDeviceCreateBuffer(self.device, &.{
+        .usage = c.WGPUBufferUsage_Uniform | c.WGPUBufferUsage_CopyDst,
+        .size = @sizeOf(ModelUniform),
+    });
+    errdefer c.wgpuBufferRelease(ubo);
+    errdefer c.wgpuBufferDestroy(ubo);
+    c.wgpuQueueWriteBuffer(self.queue, ubo, 0, &uniform_data, @sizeOf(ModelUniform));
+
+    // TODO: Do tonemapping so HDR textures look ok with SDR display.
+    const texture_data = try self.data_dir.readFileAlloc(
+        self.allocator,
+        options.texture_path,
+        512 * 1024 * 1024,
+    );
+    defer self.allocator.free(texture_data);
+    var ktx_texture: ?*c.ktxTexture2 = null;
+    if (c.ktxTexture2_CreateFromMemory(
+        texture_data.ptr,
+        @intCast(texture_data.len),
+        c.KTX_TEXTURE_CREATE_NO_FLAGS,
+        &ktx_texture,
+    ) != c.KTX_SUCCESS) {
+        return error.CreateKtxTextureFailed;
+    }
+    defer c.ktxTexture2_Destroy(ktx_texture);
+    const texture, const texture_format = try wgpu.deviceLoadTexture(
+        self.device,
+        self.queue,
+        ktx_texture.?,
+    );
+    defer c.wgpuTextureRelease(texture);
+    errdefer c.wgpuTextureDestroy(texture);
+    const albedo_texture_view = c.wgpuTextureCreateView(texture, &.{
+        .format = texture_format,
+        .dimension = c.WGPUTextureViewDimension_2D,
+        .baseMipLevel = 0,
+        .mipLevelCount = ktx_texture.?.numLevels,
+        .baseArrayLayer = 0,
+        .arrayLayerCount = ktx_texture.?.numLayers,
+        .aspect = c.WGPUTextureAspect_All,
+    });
+    defer c.wgpuTextureViewRelease(albedo_texture_view);
+
+    // TODO: Maybe factor this out into a separate function.
+    const scene_data = try self.data_dir.readFileAllocOptions(
+        self.allocator,
+        options.scene_path,
+        4 * 1024 * 1024,
+        null,
+        @alignOf(u32),
+        null,
+    );
+    defer self.allocator.free(scene_data);
+    var gltf = Gltf.init(self.allocator);
+    defer gltf.deinit();
+    try gltf.parse(scene_data);
+    const gltf_scene_index = gltf.data.scene.?;
+    const gltf_scene = gltf.data.scenes.items[gltf_scene_index];
+    const gltf_node_index = gltf_scene.nodes.?.items[0];
+    const gltf_node = gltf.data.nodes.items[gltf_node_index];
+    const gltf_mesh_index = gltf_node.mesh.?;
+    const gltf_mesh = gltf.data.meshes.items[gltf_mesh_index];
+    var vertex_count: usize = 0;
+    var index_count: usize = 0;
+    for (gltf_mesh.primitives.items) |primitive| {
+        index_count += @intCast(gltf.data.accessors.items[primitive.indices.?].count);
+        for (primitive.attributes.items) |attribute| {
+            switch (attribute) {
+                .position => |index| {
+                    vertex_count += @intCast(gltf.data.accessors.items[index].count);
+                    break;
+                },
+                else => {},
+            }
+        }
+    }
+    const vertices = try self.allocator.alloc(Vertex, vertex_count);
+    defer self.allocator.free(vertices);
+    const indices = try self.allocator.alloc(u32, index_count);
+    defer self.allocator.free(indices);
+    var vertex_cursor: usize = 0;
+    var index_cursor: usize = 0;
+    for (gltf_mesh.primitives.items) |primitive| {
+        var position_accessor: Gltf.Accessor = undefined;
+        var uv_accessor: Gltf.Accessor = undefined;
+        for (primitive.attributes.items) |attribute| {
+            switch (attribute) {
+                .position => |index| {
+                    position_accessor = gltf.data.accessors.items[index];
+                },
+                .texcoord => |index| {
+                    uv_accessor = gltf.data.accessors.items[index];
+                },
+                else => {},
+            }
+        }
+
+        std.debug.assert(position_accessor.component_type == .float);
+        std.debug.assert(uv_accessor.component_type == .float);
+
+        var position_iter = position_accessor.iterator(f32, gltf, gltf.glb_binary.?);
+        var uv_iter = uv_accessor.iterator(f32, gltf, gltf.glb_binary.?);
+        while (position_iter.next()) |position| : (vertex_cursor += 1) {
+            const uv = uv_iter.next().?;
+            vertices[vertex_cursor] = .{
+                .position = position[0..][0..3].*,
+                .uv = uv[0..][0..2].*,
+            };
+        }
+
+        const index_accessor = gltf.data.accessors.items[primitive.indices.?];
+        std.debug.assert(index_accessor.component_type == .unsigned_short);
+        var index_iter = index_accessor.iterator(u16, gltf, gltf.glb_binary.?);
+        while (index_iter.next()) |index| : (index_cursor += 1) {
+            indices[index_cursor] = index[0];
+        }
+    }
+    const vbo_content_size = mem.sizeOfElements(vertices);
+    const vbo = c.wgpuDeviceCreateBuffer(self.device, &.{
+        .usage = c.WGPUBufferUsage_Vertex | c.WGPUBufferUsage_CopyDst,
+        .size = vbo_content_size,
+    });
+    errdefer c.wgpuBufferRelease(vbo);
+    errdefer c.wgpuBufferDestroy(vbo);
+    c.wgpuQueueWriteBuffer(self.queue, vbo, 0, vertices.ptr, vbo_content_size);
+    const ibo_content_size = mem.sizeOfElements(indices);
+    const ibo = c.wgpuDeviceCreateBuffer(self.device, &.{
+        .usage = c.WGPUBufferUsage_Index | c.WGPUBufferUsage_CopyDst,
+        .size = ibo_content_size,
+    });
+    errdefer c.wgpuBufferRelease(ibo);
+    errdefer c.wgpuBufferDestroy(ibo);
+    c.wgpuQueueWriteBuffer(self.queue, ibo, 0, indices.ptr, ibo_content_size);
+
+    const uniform_bind_group = c.wgpuDeviceCreateBindGroup(self.device, &.{
+        .layout = self.model_bind_group_layout,
+        .entryCount = 1,
+        .entries = &.{
+            .buffer = ubo,
+            .size = @sizeOf(ModelUniform),
+        },
+    });
+    errdefer c.wgpuBindGroupRelease(uniform_bind_group);
+
+    const texture_bind_group_entries: []const c.WGPUBindGroupEntry = &.{
+        .{ .binding = 0, .textureView = albedo_texture_view },
+    };
+    const texture_bind_group = c.wgpuDeviceCreateBindGroup(self.device, &.{
+        .layout = self.texture_bind_group_layout,
+        .entryCount = @intCast(texture_bind_group_entries.len),
+        .entries = texture_bind_group_entries.ptr,
+    });
+    errdefer c.wgpuBindGroupRelease(texture_bind_group);
+
+    return .{
+        .ubo = ubo,
+        .vbo = vbo,
+        .vbo_content_size = vbo_content_size,
+        .ibo = ibo,
+        .ibo_content_size = ibo_content_size,
+        .index_count = index_count,
+        .uniform_bind_group = uniform_bind_group,
+        .texture_bind_group = texture_bind_group,
+    };
 }
 
 fn tick(self: *Engine) void {
@@ -797,11 +924,51 @@ fn renderFrame(self: *Engine, delta_time: f32) void {
     });
     defer c.wgpuRenderPassEncoderRelease(render_pass);
     c.wgpuRenderPassEncoderSetPipeline(render_pass, self.pipeline);
-    c.wgpuRenderPassEncoderSetBindGroup(render_pass, 0, self.mvp_bind_group, 0, null);
-    c.wgpuRenderPassEncoderSetBindGroup(render_pass, 1, self.texture_bind_group, 0, null);
-    c.wgpuRenderPassEncoderSetVertexBuffer(render_pass, 0, self.vbo, 0, self.vbo_content_size);
-    c.wgpuRenderPassEncoderSetIndexBuffer(render_pass, self.ibo, c.WGPUIndexFormat_Uint32, 0, self.ibo_content_size);
-    c.wgpuRenderPassEncoderDrawIndexed(render_pass, @intCast(self.index_count), 1, 0, 0, 0);
+    c.wgpuRenderPassEncoderSetBindGroup(
+        render_pass,
+        @intFromEnum(SetIndex.frame),
+        self.frame.bind_group,
+        0,
+        null,
+    );
+    c.wgpuRenderPassEncoderSetBindGroup(
+        render_pass,
+        @intFromEnum(SetIndex.sampler),
+        self.default_sampler_bind_group,
+        0,
+        null,
+    );
+    inline for (.{ self.dragon, self.arena }) |model| {
+        c.wgpuRenderPassEncoderSetBindGroup(
+            render_pass,
+            @intFromEnum(SetIndex.model),
+            model.uniform_bind_group,
+            0,
+            null,
+        );
+        c.wgpuRenderPassEncoderSetBindGroup(
+            render_pass,
+            @intFromEnum(SetIndex.texture),
+            model.texture_bind_group,
+            0,
+            null,
+        );
+        c.wgpuRenderPassEncoderSetVertexBuffer(
+            render_pass,
+            0,
+            model.vbo,
+            0,
+            model.vbo_content_size,
+        );
+        c.wgpuRenderPassEncoderSetIndexBuffer(
+            render_pass,
+            model.ibo,
+            c.WGPUIndexFormat_Uint32,
+            0,
+            model.ibo_content_size,
+        );
+        c.wgpuRenderPassEncoderDrawIndexed(render_pass, @intCast(model.index_count), 1, 0, 0, 0);
+    }
     c.ImGuiBackendEndFrame(render_pass);
     c.wgpuRenderPassEncoderEnd(render_pass);
 
@@ -837,15 +1004,15 @@ fn update(self: *Engine, delta_time: f32) void {
         move_direction.normalize();
         self.camera.translate(delta_time, move_direction);
         const camera_matrices = self.camera.computeMatrices();
-        self.uniform.view = camera_matrices.view;
-        c.wgpuQueueWriteBuffer(self.queue, self.uniform_buffer, 0, &self.uniform, @sizeOf(Uniform));
+        self.frame.uniform_data.view = camera_matrices.view;
+        c.wgpuQueueWriteBuffer(self.queue, self.frame.ubo, 0, &self.frame.uniform_data, @sizeOf(FrameUniform));
     }
 }
 
 fn onFramebufferSizeChanged(self: *Engine, width: u32, height: u32) void {
     self.recreateSwapChain(width, height);
     const aspect_ratio = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
-    self.uniform.proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01);
+    self.frame.uniform_data.proj = math.perspectiveInverseDepth(std.math.degreesToRadians(80.0), aspect_ratio, 0.01);
 }
 
 fn recreateSwapChain(self: *Engine, width: u32, height: u32) void {
