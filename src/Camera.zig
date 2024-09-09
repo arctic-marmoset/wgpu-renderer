@@ -23,6 +23,12 @@ pub const MoveDirection = struct {
     up: bool = false,
     down: bool = false,
 
+    pub fn normalized(direction: MoveDirection) MoveDirection {
+        var mut_direction = direction;
+        mut_direction.normalize();
+        return mut_direction;
+    }
+
     pub fn normalize(self: *MoveDirection) void {
         if (self.forward and self.backward) {
             self.forward = false;
@@ -64,8 +70,9 @@ pub fn translate(self: *Camera, delta_time: f32, move_direction: MoveDirection) 
 
     var changed = false;
 
-    const move_speed = 2.0 * delta_time;
-    const move_speed_vec3: math.Vec3 = @splat(move_speed);
+    const sensitivity = 2.0;
+    const move_amount = delta_time * sensitivity;
+    const move_speed_vec3: math.Vec3 = @splat(move_amount);
     if (move_direction.forward) {
         changed = true;
         self.position += forward * move_speed_vec3;
@@ -92,12 +99,13 @@ pub fn translate(self: *Camera, delta_time: f32, move_direction: MoveDirection) 
     }
 }
 
-pub fn updateOrientation(self: *Camera, offset: math.Vec2) void {
-    const sensitivity = 0.005;
+pub fn updateOrientation(self: *Camera, delta_time: f32, offset: math.Vec2) void {
+    const sensitivity = 2.0;
+    const move_amount = delta_time * sensitivity;
     const pitch_limit = 0.5 * std.math.pi - 0.01;
 
-    const delta_yaw = sensitivity * offset[0];
-    const delta_pitch = sensitivity * offset[1];
+    const delta_yaw = move_amount * offset[0];
+    const delta_pitch = move_amount * offset[1];
 
     self.yaw = @mod(self.yaw + delta_yaw, 2.0 * std.math.pi);
     self.pitch = std.math.clamp(self.pitch + delta_pitch, -pitch_limit, pitch_limit);

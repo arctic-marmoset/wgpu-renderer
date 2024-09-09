@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const BindGroup = @import("src/renderer/definitions.zig").BindGroup;
+
 const buildShaders = @import("build-src/shader.zig").buildShaders;
 
 const fs = std.fs;
@@ -130,6 +132,23 @@ pub fn build(b: *std.Build) !void {
         },
     }
 
+    exe.root_module.addAnonymousImport("resources", .{
+        .root_source_file = b.path("resources/root.zig"),
+    });
+
+    const compile_definitions = comptime blk: {
+        var definitions: [std.meta.fields(BindGroup).len][]const u8 = undefined;
+        for (&definitions, std.meta.fields(BindGroup)) |*definition, field| {
+            var group_name_upper: [field.name.len]u8 = undefined;
+            _ = std.ascii.upperString(&group_name_upper, field.name);
+            definition.* = std.fmt.comptimePrint("-D{s}_SET_INDEX={}", .{
+                &group_name_upper,
+                field.value,
+            });
+        }
+        break :blk definitions;
+    };
+
     _ = buildShaders(b, .{
         .step_name = "shaders",
         .description = "Compile shaders to SPIR-V bytecode",
@@ -139,6 +158,7 @@ pub fn build(b: *std.Build) !void {
             "shaders/src/basic.vert",
             "shaders/src/basic.frag",
         },
+        .flags = &compile_definitions,
     });
 
     const unit_tests = b.addTest(.{

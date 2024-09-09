@@ -14,6 +14,7 @@ pub const ShadersOptions = struct {
     debug_symbols: bool = false,
     out_dir_path: []const u8 = "shaders",
     sources: []const []const u8 = &.{},
+    flags: []const []const u8 = &.{},
     file_extensions: struct {
         bytecode: []const u8,
         depfile: []const u8,
@@ -57,6 +58,7 @@ pub fn buildShaders(
         const shader_binary = command.addOutputFileArg(output_file);
         if (options.debug_symbols) command.addArg("-g");
         command.addArgs(optimize_flags);
+        command.addArgs(options.flags);
         command.addFileArg(b.path(source));
         step.dependOn(&command.step);
 

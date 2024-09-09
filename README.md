@@ -18,12 +18,12 @@ dependencies to cross-compile cleanly.)
 - Reversed Z buffer with infinite far plane
 - glTF binary meshes
 - KTX2 textures
-    - BC7 (SDR base color)
+    - BC7 (SDR diffuse + specular)
     - BC6H (HDR base color)
     - BC4u (monochrome)
 
 ## Preview
-![2024-08-31 Specular Mapping](docs/media/2024-09-08_specular_map.jpg)
+![2024-09-16 Models with Multiple Materials](docs/media/2024-09-16_complex_textured_models.jpg)
 
 # Development
 

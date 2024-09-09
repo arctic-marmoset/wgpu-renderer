@@ -25,6 +25,6 @@ void ImGuiBackendBeginFrame() {
     ImGui_ImplGlfw_NewFrame();
 }
 
-void ImGuiBackendEndFrame(WGPURenderPassEncoder renderPassEncoder) {
+void ImGuiBackendDraw(WGPURenderPassEncoder renderPassEncoder) {
     ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), renderPassEncoder);
 }

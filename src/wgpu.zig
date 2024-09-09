@@ -412,7 +412,7 @@ fn loadTextureCompressed(
     return c.KTX_SUCCESS;
 }
 
-pub fn textureFormatToString(format: c.WGPUTextureFormat) []const u8 {
+pub fn textureFormatName(format: c.WGPUTextureFormat) []const u8 {
     return switch (format) {
         c.WGPUTextureFormat_Undefined => "Undefined",
         c.WGPUTextureFormat_R8Unorm => "R8Unorm",
@@ -514,7 +514,7 @@ pub fn textureFormatToString(format: c.WGPUTextureFormat) []const u8 {
     };
 }
 
-pub fn presentModeToString(mode: c.WGPUPresentMode) []const u8 {
+pub fn presentModeName(mode: c.WGPUPresentMode) []const u8 {
     return switch (mode) {
         c.WGPUPresentMode_Fifo => "Fifo",
         c.WGPUPresentMode_FifoRelaxed => "FifoRelaxed",
@@ -524,7 +524,7 @@ pub fn presentModeToString(mode: c.WGPUPresentMode) []const u8 {
     };
 }
 
-pub fn featureToString(feature: c.WGPUFeatureName) []const u8 {
+pub fn featureName(feature: c.WGPUFeatureName) []const u8 {
     return switch (feature) {
         c.WGPUFeatureName_Undefined => "Undefined",
         c.WGPUFeatureName_DepthClipControl => "DepthClipControl",
@@ -552,7 +552,7 @@ pub fn featureToString(feature: c.WGPUFeatureName) []const u8 {
     };
 }
 
-pub fn adapterTypeToString(kind: c.WGPUAdapterType) []const u8 {
+pub fn adapterTypeName(kind: c.WGPUAdapterType) []const u8 {
     return switch (kind) {
         c.WGPUAdapterType_DiscreteGPU => "DiscreteGPU",
         c.WGPUAdapterType_IntegratedGPU => "IntegratedGPU",
@@ -562,7 +562,7 @@ pub fn adapterTypeToString(kind: c.WGPUAdapterType) []const u8 {
     };
 }
 
-pub fn backendTypeToString(backend: c.WGPUBackendType) []const u8 {
+pub fn backendTypeName(backend: c.WGPUBackendType) []const u8 {
     return switch (backend) {
         c.WGPUBackendType_Undefined => "Undefined",
         c.WGPUBackendType_Null => "Null",
@@ -577,7 +577,7 @@ pub fn backendTypeToString(backend: c.WGPUBackendType) []const u8 {
     };
 }
 
-pub fn deviceLostReasonToString(reason: c.WGPUDeviceLostReason) []const u8 {
+pub fn deviceLostReasonName(reason: c.WGPUDeviceLostReason) []const u8 {
     return switch (reason) {
         c.WGPUDeviceLostReason_Undefined => "Undefined",
         c.WGPUDeviceLostReason_Destroyed => "Destroyed",
@@ -585,7 +585,7 @@ pub fn deviceLostReasonToString(reason: c.WGPUDeviceLostReason) []const u8 {
     };
 }
 
-pub fn errorTypeToString(kind: c.WGPUErrorType) []const u8 {
+pub fn errorTypeName(kind: c.WGPUErrorType) []const u8 {
     return switch (kind) {
         c.WGPUErrorType_NoError => "NoError",
         c.WGPUErrorType_Validation => "Validation",
@@ -603,7 +603,7 @@ pub fn formatTextureFormat(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    return formatEnumValue(format, fmt, options, writer, textureFormatToString);
+    return formatEnumValue(format, fmt, options, writer, textureFormatName);
 }
 
 pub fn formatPresentMode(
@@ -612,7 +612,7 @@ pub fn formatPresentMode(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    return formatEnumValue(mode, fmt, options, writer, presentModeToString);
+    return formatEnumValue(mode, fmt, options, writer, presentModeName);
 }
 
 pub fn formatFeature(
@@ -621,7 +621,7 @@ pub fn formatFeature(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    return formatEnumValue(feature, fmt, options, writer, featureToString);
+    return formatEnumValue(feature, fmt, options, writer, featureName);
 }
 
 pub fn formatAdapterType(
@@ -630,7 +630,7 @@ pub fn formatAdapterType(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    return formatEnumValue(kind, fmt, options, writer, adapterTypeToString);
+    return formatEnumValue(kind, fmt, options, writer, adapterTypeName);
 }
 
 pub fn formatBackendType(
@@ -639,7 +639,7 @@ pub fn formatBackendType(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    return formatEnumValue(backend, fmt, options, writer, backendTypeToString);
+    return formatEnumValue(backend, fmt, options, writer, backendTypeName);
 }
 
 pub fn formatDeviceLostReason(
@@ -648,7 +648,7 @@ pub fn formatDeviceLostReason(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    return formatEnumValue(reason, fmt, options, writer, deviceLostReasonToString);
+    return formatEnumValue(reason, fmt, options, writer, deviceLostReasonName);
 }
 
 pub fn formatErrorType(
@@ -657,7 +657,7 @@ pub fn formatErrorType(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    return formatEnumValue(kind, fmt, options, writer, errorTypeToString);
+    return formatEnumValue(kind, fmt, options, writer, errorTypeName);
 }
 
 fn formatEnumValue(

@@ -22,7 +22,7 @@ void ImGuiBackendTerminate(void);
 
 void ImGuiBackendBeginFrame(void);
 
-void ImGuiBackendEndFrame(WGPURenderPassEncoder renderPassEncoder);
+void ImGuiBackendDraw(WGPURenderPassEncoder renderPassEncoder);
 
 #if defined(__cplusplus)
 }

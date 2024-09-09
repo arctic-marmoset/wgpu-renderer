@@ -2,6 +2,15 @@ const std = @import("std");
 
 const c = @import("c.zig");
 
+pub const Extent2D = struct {
+    width: u32,
+    height: u32,
+
+    pub fn aspectRatio(self: Extent2D) f32 {
+        return @as(f32, @floatFromInt(self.width)) / @as(f32, @floatFromInt(self.height));
+    }
+};
+
 pub const CoordinateSystem = struct {
     right: Axis,
     up: Axis,
@@ -65,6 +74,10 @@ pub const Vec4 = @Vector(4, f32);
 pub const Mat4 = [4]Vec4;
 pub const Mat4x3 = [3]Vec4;
 
+pub fn vec2Zero() Vec2 {
+    return .{ 0.0, 0.0 };
+}
+
 pub fn vec3Zero() Vec3 {
     return .{ 0.0, 0.0, 0.0 };
 }
@@ -92,7 +105,7 @@ pub fn vec3Normalize(vec: Vec3) Vec3 {
 
     if (norm < std.math.floatEps(f32)) {
         @branchHint(.unlikely);
-        return std.mem.zeroes(Vec3);
+        return vec3Zero();
     }
 
     return vec3Scale(vec, 1.0 / norm);
@@ -145,6 +158,14 @@ pub fn mat4Identity() Mat4 {
     };
 }
 
+pub fn mat4x3Identity() Mat4x3 {
+    return .{
+        .{ 1.0, 0.0, 0.0, 0.0 },
+        .{ 0.0, 1.0, 0.0, 0.0 },
+        .{ 0.0, 0.0, 1.0, 0.0 },
+    };
+}
+
 pub fn mat4Mul(a: Mat4, b: Mat4) Mat4 {
     var product: Mat4 = undefined;
 
@@ -167,6 +188,40 @@ pub fn mat4Mul(a: Mat4, b: Mat4) Mat4 {
     return product;
 }
 
+pub fn mat4Inverse(mat: Mat4) Mat4 {
+    var mut_mat = mat;
+    var mat_inverse: Mat4 = undefined;
+    c.glmc_mat4_inv(&mut_mat, &mat_inverse);
+    return mat_inverse;
+}
+
+pub fn mat4Transpose(mat: Mat4) Mat4 {
+    var mut_mat = mat;
+    c.glmc_mat4_transpose(&mut_mat);
+    return mut_mat;
+}
+
+pub fn translate(mat: Mat4, vec: Vec3) Mat4 {
+    var mut_translation: c.vec3 = vec;
+    var translated = mat;
+    c.glmc_translate(&translated, &mut_translation);
+    return translated;
+}
+
+pub fn rotateQuat(mat: Mat4, quat: Vec4) Mat4 {
+    var mut_mat = mat;
+    var mut_quat: c.versor align(32) = quat;
+    c.glmc_quat_rotate(&mut_mat, &mut_quat, &mut_mat);
+    return mut_mat;
+}
+
+pub fn rotateAxis(mat: Mat4, angle: f32, axis: Vec3) Mat4 {
+    var mut_mat = mat;
+    var mut_axis: c.vec3 = axis;
+    c.glmc_rotate(&mut_mat, angle, &mut_axis);
+    return mut_mat;
+}
+
 pub fn scale(mat: Mat4, factor: Vec3) Mat4 {
     const scaled: Mat4 = .{
         vec4Scale(mat[0], factor[0]),
@@ -182,6 +237,10 @@ pub fn scaleUniform(mat: Mat4, factor: f32) Mat4 {
     const factor_vec3: Vec3 = @splat(factor);
     const scaled = scale(mat, factor_vec3);
     return scaled;
+}
+
+pub fn mat4x3Truncating(mat: Mat4) Mat4x3 {
+    return mat[0..3].*;
 }
 
 pub fn lookAt(
