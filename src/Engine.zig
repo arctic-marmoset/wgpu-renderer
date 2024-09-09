@@ -39,6 +39,7 @@ imgui_io: *c.ImGuiIO,
 last_instant: std.time.Instant,
 
 default_sampler_bind_group: c.WGPUBindGroup,
+fallback_base_texture: c.WGPUTextureView,
 fallback_specular_map: c.WGPUTextureView,
 frame: FrameRenderData,
 dragon: ModelRenderData,
@@ -486,7 +487,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     const framebuffer_extent = glfw.getFramebufferSize(window);
 
     const camera = Camera.init(.{
-        .position = -math.vec3Scale(world_space.forward.vector(), 5.0),
+        .position = math.vec3Scale(world_space.forward.vector(), -2.5),
         .target = world_space.forward.vector(),
     });
 
@@ -592,6 +593,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .default_sampler_bind_group = default_sampler_bind_group,
         .frame = frame,
         // Deferred to Engine.loadTexture.
+        .fallback_base_texture = undefined,
         .fallback_specular_map = undefined,
         // Deferred to Engine.loadModel.
         .dragon = undefined,
@@ -607,28 +609,31 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     // Could maybe resolve by factoring out base graphics API resources to GraphicsContext.
     engine.createSwapChain(framebuffer_extent.width, framebuffer_extent.height);
 
+    engine.fallback_base_texture = try engine.loadTexture("textures/missing_bc7.ktx2");
+    errdefer c.wgpuTextureViewRelease(engine.fallback_base_texture);
     engine.fallback_specular_map = try engine.loadTexture("textures/missing_specular_bc4u.ktx2");
+    errdefer c.wgpuTextureViewRelease(engine.fallback_specular_map);
 
-    var translate_scale = math.mat4Identity();
-    var up: c.vec3 = math.vec3Scale(world_space.up.vector(), 0.2);
-    c.glmc_translate(&translate_scale, &up);
+    var dragon_translate = math.mat4Identity();
+    var dragon_down: c.vec3 = math.vec3Scale(world_space.up.vector(), -1.0);
+    c.glmc_translate(&dragon_translate, &dragon_down);
     engine.dragon = try engine.loadModel(.{
         .base_texture_path = "textures/stanford_dragon_base_bc7.ktx2",
-        .scene_path = "meshes/stanford_dragon.glb",
-        .transform = math.scaleUniform(translate_scale, 10.0),
+        .kind = .{ .scene = "meshes/stanford_dragon.glb" },
+        .transform = math.scaleUniform(dragon_translate, 2.0),
     });
     engine.arena = try engine.loadModel(.{
-        .base_texture_path = "textures/missing_bc7.ktx2",
-        .scene_path = "meshes/arena.glb",
+        .kind = .{ .scene = "meshes/arena.glb" },
     });
-    var down: c.vec3 = math.vec3Scale(world_space.up.vector(), -0.8);
-    var translate = math.mat4Identity();
-    c.glmc_translate(&translate, &down);
+    var down: c.vec3 = math.vec3Scale(world_space.up.vector(), -1.4);
+    var cube_translate_scale = math.mat4Identity();
+    c.glmc_translate(&cube_translate_scale, &down);
+    cube_translate_scale = math.scaleUniform(cube_translate_scale, 0.4);
     engine.cube = try engine.loadModel(.{
         .base_texture_path = "textures/crate/crate_base_bc7.ktx2",
         .specular_map_path = "textures/crate/crate_specular_bc4u.ktx2",
-        .scene_path = "meshes/cube.glb",
-        .transform = translate,
+        .kind = .{ .scene = "meshes/cube.glb" },
+        .transform = cube_translate_scale,
     });
 
     return engine;
@@ -642,6 +647,7 @@ pub fn deinit(self: *Engine) void {
     self.arena.deinit();
     self.dragon.deinit();
     c.wgpuTextureViewRelease(self.fallback_specular_map);
+    c.wgpuTextureViewRelease(self.fallback_base_texture);
 
     self.frame.deinit();
 
@@ -674,14 +680,84 @@ pub fn run(self: *Engine) !void {
 }
 
 const LoadModelOptions = struct {
-    base_texture_path: []const u8,
+    base_texture_path: ?[]const u8 = null,
     specular_map_path: ?[]const u8 = null,
-    scene_path: []const u8,
+    kind: union(enum) {
+        scene: []const u8,
+        node: struct {
+            gltf: Gltf,
+            data: Gltf.Node,
+        },
+    },
     transform: math.Mat4 = math.mat4Identity(),
 };
 
 fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
-    var model_matrix = math.mat4Mul(model_transform, options.transform);
+    // TODO: Do tonemapping so HDR textures look ok with SDR display.
+    var base: c.WGPUTextureView = null;
+    if (options.base_texture_path) |path| {
+        base = try self.loadTexture(path);
+    }
+    defer if (base) |view| c.wgpuTextureViewRelease(view);
+
+    var specular: c.WGPUTextureView = null;
+    if (options.specular_map_path) |path| {
+        specular = try self.loadTexture(path);
+    }
+    defer if (specular) |view| c.wgpuTextureViewRelease(view);
+
+    // TODO: Maybe factor this out into a separate function.
+    const scene_data: []align(@alignOf(u32)) u8, const gltf_owned, var gltf: Gltf, const node: Gltf.Node =
+        switch (options.kind) {
+        .node => |info| .{ &.{}, false, info.gltf, info.data },
+        .scene => |path| blk: {
+            const scene_data = try self.data_dir.readFileAllocOptions(
+                self.allocator,
+                path,
+                4 * 1024 * 1024,
+                null,
+                @alignOf(u32),
+                null,
+            );
+            errdefer self.allocator.free(scene_data);
+            var gltf = Gltf.init(self.allocator);
+            errdefer gltf.deinit();
+            try gltf.parse(scene_data);
+
+            const scene_index = gltf.data.scene.?;
+            const scene = gltf.data.scenes.items[scene_index];
+            const node_index = scene.nodes.?.items[0];
+            const node = gltf.data.nodes.items[node_index];
+
+            break :blk .{ scene_data, true, gltf, node };
+        },
+    };
+    defer self.allocator.free(scene_data);
+    defer if (gltf_owned) gltf.deinit();
+
+    const mesh_index = node.mesh.?;
+    const mesh = gltf.data.meshes.items[mesh_index];
+
+    // https://microsoft.github.io/mixed-reality-extension-sdk/gltf-gen/interfaces/gltf.node.html:
+    // A node can have _either_ a matrix or any combination of
+    // translation/rotation/scale (TRS) properties.
+    var transform: math.Mat4 = math.mat4Identity();
+    // 1. Apply node transforms (which are in glTF space).
+    if (node.matrix) |matrix| {
+        transform = @bitCast(matrix);
+    } else {
+    var mut_translation: c.vec3 = node.translation;
+    c.glmc_translate(&transform, &mut_translation);
+    var mut_rotation: c.versor align(32) = node.rotation;
+    c.glmc_quat_rotate(&transform, &mut_rotation, &transform);
+    transform = math.scale(transform, node.scale);
+    }
+    // 2. Convert to world space.
+    transform = math.mat4Mul(transform, model_transform);
+    // 3. Apply custom transforms (which are in world space).
+    transform = math.mat4Mul(transform, options.transform);
+
+    var model_matrix: c.mat4 align(32) = transform;
     var model_inv: math.Mat4 = undefined;
     c.glmc_mat4_inv(&model_matrix, &model_inv);
     var normal_matrix: math.Mat4 = undefined;
@@ -699,39 +775,9 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     errdefer c.wgpuBufferDestroy(ubo);
     c.wgpuQueueWriteBuffer(self.queue, ubo, 0, &uniform_data, @sizeOf(@TypeOf(uniform_data)));
 
-    // TODO: Do tonemapping so HDR textures look ok with SDR display.
-    const base = try self.loadTexture(options.base_texture_path);
-    defer c.wgpuTextureViewRelease(base);
-
-    var specular: c.WGPUTextureView = null;
-    if (options.specular_map_path) |specular_map_path| {
-        specular = try self.loadTexture(specular_map_path);
-    }
-    defer if (specular) |view| c.wgpuTextureViewRelease(view);
-
-    // TODO: Maybe factor this out into a separate function.
-    const scene_data = try self.data_dir.readFileAllocOptions(
-        self.allocator,
-        options.scene_path,
-        4 * 1024 * 1024,
-        null,
-        @alignOf(u32),
-        null,
-    );
-    defer self.allocator.free(scene_data);
-
-    var gltf = Gltf.init(self.allocator);
-    defer gltf.deinit();
-    try gltf.parse(scene_data);
-    const gltf_scene_index = gltf.data.scene.?;
-    const gltf_scene = gltf.data.scenes.items[gltf_scene_index];
-    const gltf_node_index = gltf_scene.nodes.?.items[0];
-    const gltf_node = gltf.data.nodes.items[gltf_node_index];
-    const gltf_mesh_index = gltf_node.mesh.?;
-    const gltf_mesh = gltf.data.meshes.items[gltf_mesh_index];
     var vertex_count: usize = 0;
     var index_count: usize = 0;
-    for (gltf_mesh.primitives.items) |primitive| {
+    for (mesh.primitives.items) |primitive| {
         index_count += @intCast(gltf.data.accessors.items[primitive.indices.?].count);
         for (primitive.attributes.items) |attribute| {
             switch (attribute) {
@@ -750,7 +796,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     defer self.allocator.free(indices);
     var vertex_cursor: usize = 0;
     var index_cursor: usize = 0;
-    for (gltf_mesh.primitives.items) |primitive| {
+    for (mesh.primitives.items) |primitive| {
         var position_accessor: Gltf.Accessor = undefined;
         var normal_accessor: Gltf.Accessor = undefined;
         var uv_accessor: Gltf.Accessor = undefined;
@@ -823,7 +869,7 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     errdefer c.wgpuBindGroupRelease(uniform_bind_group);
 
     const texture_bind_group_entries: []const c.WGPUBindGroupEntry = &.{
-        .{ .binding = 0, .textureView = base },
+        .{ .binding = 0, .textureView = base orelse self.fallback_base_texture },
         .{ .binding = 1, .textureView = specular orelse self.fallback_specular_map },
     };
     const texture_bind_group = c.wgpuDeviceCreateBindGroup(self.device, &.{
