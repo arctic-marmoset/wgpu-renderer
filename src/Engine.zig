@@ -45,6 +45,12 @@ frame: FrameRenderData,
 dragon: ModelRenderData,
 arena: ModelRenderData,
 cube: ModelRenderData,
+// TODO: This shouldn't have to be an array of meshes. We need to rework the
+// "Model" concept to match glTF's "scene". I.e. models should be composed of
+// multiple nodes of meshes.
+porche: struct {
+    meshes: []ModelRenderData = &.{},
+},
 
 camera: Camera,
 
@@ -599,6 +605,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .dragon = undefined,
         .arena = undefined,
         .cube = undefined,
+        .porche = .{},
 
         .camera = camera,
 
@@ -636,6 +643,41 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .transform = cube_translate_scale,
     });
 
+    const porche_scene_data = try data_dir.readFileAllocOptions(
+        allocator,
+        "meshes/porche.glb",
+        8 * 1024 * 1024,
+        null,
+        @alignOf(u32),
+        null,
+    );
+    defer allocator.free(porche_scene_data);
+    var porche_gltf = Gltf.init(allocator);
+    defer porche_gltf.deinit();
+    try porche_gltf.parse(porche_scene_data);
+    engine.porche.meshes = try allocator.alloc(ModelRenderData, porche_gltf.data.nodes.items.len);
+    errdefer allocator.free(engine.porche.meshes);
+    var translate_rotate = math.mat4Identity();
+    var forward_down: c.vec3 = math.vec3Scale(world_space.forward.vector(), 2.5) + math.vec3Scale(world_space.up.vector(), -1.95);
+    c.glmc_translate(&translate_rotate, &forward_down);
+    var vertical_axis: c.vec3 = world_space.up.vector();
+    c.glmc_rotate(&translate_rotate, std.math.degreesToRadians(90.0), &vertical_axis);
+    for (engine.porche.meshes, porche_gltf.data.nodes.items) |*renderable, node| {
+        // TODO: Handle loading different textures for each renderable.
+        // TODO: Load nodes in hierarchical order so we can apply inherited
+        // transforms.
+        // TODO: Read material data (e.g. colour).
+        renderable.* = try engine.loadModel(.{
+            .kind = .{
+                .node = .{
+                    .gltf = porche_gltf,
+                    .data = node,
+                },
+            },
+            .transform = translate_rotate,
+        });
+    }
+
     return engine;
 }
 
@@ -643,6 +685,8 @@ pub fn deinit(self: *Engine) void {
     c.ImGuiBackendTerminate();
     c.ImGui_DestroyContext(self.imgui_context);
 
+    for (self.porche.meshes) |mesh| mesh.deinit();
+    self.allocator.free(self.porche.meshes);
     self.cube.deinit();
     self.arena.deinit();
     self.dragon.deinit();
@@ -746,11 +790,11 @@ fn loadModel(self: *Engine, options: LoadModelOptions) !ModelRenderData {
     if (node.matrix) |matrix| {
         transform = @bitCast(matrix);
     } else {
-    var mut_translation: c.vec3 = node.translation;
-    c.glmc_translate(&transform, &mut_translation);
-    var mut_rotation: c.versor align(32) = node.rotation;
-    c.glmc_quat_rotate(&transform, &mut_rotation, &transform);
-    transform = math.scale(transform, node.scale);
+        var mut_translation: c.vec3 = node.translation;
+        c.glmc_translate(&transform, &mut_translation);
+        var mut_rotation: c.versor align(32) = node.rotation;
+        c.glmc_quat_rotate(&transform, &mut_rotation, &transform);
+        transform = math.scale(transform, node.scale);
     }
     // 2. Convert to world space.
     transform = math.mat4Mul(transform, model_transform);
@@ -1056,6 +1100,38 @@ fn renderFrame(self: *Engine, delta_time: f32) void {
         null,
     );
     inline for (.{ self.dragon, self.arena, self.cube }) |model| {
+        c.wgpuRenderPassEncoderSetBindGroup(
+            render_pass,
+            @intFromEnum(SetIndex.model),
+            model.uniform_bind_group,
+            0,
+            null,
+        );
+        c.wgpuRenderPassEncoderSetBindGroup(
+            render_pass,
+            @intFromEnum(SetIndex.texture),
+            model.texture_bind_group,
+            0,
+            null,
+        );
+        c.wgpuRenderPassEncoderSetVertexBuffer(
+            render_pass,
+            0,
+            model.vbo,
+            0,
+            model.vbo_content_size,
+        );
+        c.wgpuRenderPassEncoderSetIndexBuffer(
+            render_pass,
+            model.ibo,
+            c.WGPUIndexFormat_Uint32,
+            0,
+            model.ibo_content_size,
+        );
+        c.wgpuRenderPassEncoderDrawIndexed(render_pass, @intCast(model.index_count), 1, 0, 0, 0);
+    }
+    // FIXME: This is duplicated from the single-mesh model draw loop.
+    for (self.porche.meshes) |model| {
         c.wgpuRenderPassEncoderSetBindGroup(
             render_pass,
             @intFromEnum(SetIndex.model),
