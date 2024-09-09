@@ -618,7 +618,7 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     var dragon_down: c.vec3 = math.vec3Scale(world_space.up.vector(), -1.0);
     c.glmc_translate(&dragon_translate, &dragon_down);
     engine.dragon = try engine.loadModel(.{
-        .base_texture_path = "textures/stanford_dragon_base_bc7.ktx2",
+        .base_texture_path = "textures/stanford_dragon/stanford_dragon_base_bc7.ktx2",
         .kind = .{ .scene = "meshes/stanford_dragon.glb" },
         .transform = math.scaleUniform(dragon_translate, 2.0),
     });
