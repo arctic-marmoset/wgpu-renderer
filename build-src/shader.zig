@@ -6,6 +6,10 @@ pub const ShadersOptions = struct {
     step_name: []const u8,
     description: []const u8,
     optimize: std.builtin.OptimizeMode,
+    // TODO: Remove when Naga has better support for optimised SPIR-V.
+    // Enabling optimisation results in a validation error:
+    //     Entry point main at Vertex is invalid
+    //     Capability Capabilities(CLIP_DISTANCE) is not supported
     ignore_optimize: bool = true,
     debug_symbols: bool = false,
     out_dir_path: []const u8 = "shaders",
