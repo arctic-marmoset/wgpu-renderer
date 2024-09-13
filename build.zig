@@ -120,6 +120,7 @@ pub fn build(b: *std.Build) !void {
             exe.linkSystemLibrary("Userenv");
             exe.linkSystemLibrary("Ws2_32");
         },
+        .linux => {},
         else => {
             std.log.err("unsupported platform: {s}-{s}-{s}", .{
                 @tagName(target.result.cpu.arch),
