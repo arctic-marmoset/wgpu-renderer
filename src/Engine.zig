@@ -102,21 +102,24 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
 
     var models = std.ArrayListUnmanaged(Renderer.Model){};
     errdefer models.deinit(allocator);
-    const arena = try renderer.loadModel(data_dir, "meshes/arena.glb", math.mat4Identity());
+    const arena = try renderer.loadModel(allocator, data_dir, "meshes/arena.glb", math.mat4Identity());
     try models.append(allocator, arena);
     const dragon = try renderer.loadModel(
+        allocator,
         data_dir,
         "meshes/stanford_dragon.glb",
         math.translate(math.mat4Identity(), math.vec3Scale(world_space.up.vector(), -1.0)),
     );
     try models.append(allocator, dragon);
     const crate = try renderer.loadModel(
+        allocator,
         data_dir,
         "meshes/crate.glb",
         math.scaleUniform(math.translate(math.mat4Identity(), math.vec3Scale(world_space.up.vector(), -1.4)), 0.4),
     );
     try models.append(allocator, crate);
     const porche = try renderer.loadModel(
+        allocator,
         data_dir,
         "meshes/porche.glb",
         math.rotateAxis(
