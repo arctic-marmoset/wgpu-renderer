@@ -24,9 +24,9 @@ camera: Camera,
 models: std.ArrayListUnmanaged(Renderer.Model),
 
 mouse_captured: bool,
+mouse_position: math.Vec2,
 last_mouse_position: math.Vec2,
 mouse_moved: bool,
-last_mouse_delta: math.Vec2,
 
 pub const model_space = math.CoordinateSystem.glTF;
 pub const world_space = math.CoordinateSystem.vulkan;
@@ -151,9 +151,9 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .models = models,
 
         .mouse_captured = true,
+        .mouse_position = mouse_position,
         .last_mouse_position = mouse_position,
         .mouse_moved = false,
-        .last_mouse_delta = math.vec2Zero(),
     };
 
     return engine;
@@ -193,6 +193,8 @@ fn isRunning(self: *Engine) bool {
 }
 
 fn update(self: *Engine, delta_time: f32) void {
+    const delta_mouse_position = self.mouse_position - self.last_mouse_position;
+
     if (!self.imgui_io.WantCaptureKeyboard) {
         self.camera.translate(delta_time, .normalized(.{
             .forward = c.glfwGetKey(self.window, c.GLFW_KEY_W) == c.GLFW_PRESS,
@@ -206,8 +208,10 @@ fn update(self: *Engine, delta_time: f32) void {
 
     if (self.mouse_captured and self.mouse_moved) {
         self.mouse_moved = false;
-        self.camera.updateOrientation(delta_time, self.last_mouse_delta);
+        self.camera.updateOrientation(delta_mouse_position);
     }
+
+    self.last_mouse_position = self.mouse_position;
 }
 
 fn onFramebufferSizeChanged(self: *Engine, extent: math.Extent2D) void {
@@ -243,10 +247,7 @@ fn onMouseButtonAction(self: *Engine, button: c_int, action: c_int, modifiers: c
 fn onMousePositionChanged(self: *Engine, x: f64, y: f64) void {
     if (!self.mouse_captured) return;
     self.mouse_moved = true;
-    const position: math.Vec2 = .{ @floatCast(x), @floatCast(y) };
-    const delta = position - self.last_mouse_position;
-    self.last_mouse_position = position;
-    self.last_mouse_delta = delta;
+    self.mouse_position = .{ @floatCast(x), @floatCast(y) };
 }
 
 fn framebufferSizeChangedCallback(
