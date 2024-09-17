@@ -211,7 +211,7 @@ fn update(self: *Engine, delta_time: f32) void {
 }
 
 fn onFramebufferSizeChanged(self: *Engine, extent: math.Extent2D) void {
-    self.renderer.recreateWindowSizedResources(extent);
+    self.renderer.recreateSwapchain(extent);
 }
 
 fn onKeyAction(self: *Engine, key: c_int, scancode: c_int, action: c_int, modifiers: c_int) void {

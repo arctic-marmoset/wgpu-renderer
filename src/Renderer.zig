@@ -26,7 +26,8 @@ window: *c.GLFWwindow,
 surface: c.WGPUSurface,
 surface_format: c.WGPUTextureFormat,
 present_mode: c.WGPUPresentMode,
-window_sized_resources: WindowSizedResources,
+swapchain: Swapchain,
+vsync: bool = false,
 
 depth_format: c.WGPUTextureFormat,
 
@@ -34,6 +35,7 @@ bind_group_layouts: std.EnumArray(BindGroup, c.WGPUBindGroupLayout),
 pipeline: c.WGPURenderPipeline,
 
 imgui_context: *c.ImGuiContext,
+settings_open: bool = true,
 
 frame_data: FrameData,
 
@@ -104,11 +106,12 @@ pub const Material = struct {
 // world space. It should probably be applied to all objects.
 const model_to_world_transform = math.CoordinateSystem.transform(Engine.model_space, Engine.world_space);
 
-const WindowSizedResources = struct {
+const Swapchain = struct {
+    extent: math.Extent2D,
     depth_texture: c.WGPUTexture,
     depth_texture_view: c.WGPUTextureView,
 
-    fn deinit(self: WindowSizedResources) void {
+    fn deinit(self: Swapchain) void {
         c.wgpuTextureViewRelease(self.depth_texture_view);
         c.wgpuTextureDestroy(self.depth_texture);
         c.wgpuTextureRelease(self.depth_texture);
@@ -351,6 +354,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) !Renderer {
         ),
     });
 
+    // TODO: Differentiate between HDR and SDR formats.
     const desired_surface_formats: []const c.WGPUTextureFormat = &.{
         c.WGPUTextureFormat_RGBA16Float,
         c.WGPUTextureFormat_BGRA8UnormSrgb,
@@ -365,6 +369,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) !Renderer {
     ) orelse return error.DesiredSurfaceFormatNotAvailable;
     log.debug("selected surface format: {s}", .{wgpu.textureFormatName(surface_format)});
 
+    // TODO: Differentiate between VSync and non-VSync modes.
     // Don't include FIFO because we'll fall back to it anyway if none of the
     // desired modes are available; FIFO is guaranteed by the WebGPU spec to be
     // available.
@@ -520,7 +525,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) !Renderer {
     });
     errdefer c.wgpuBindGroupRelease(linear_sampler_bind_group);
 
-    const window_sized_resources = createWindowSizedResources(
+    const swapchain = createSwapchain(
         device,
         framebuffer_extent,
         surface,
@@ -528,7 +533,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) !Renderer {
         surface_format,
         depth_format,
     );
-    errdefer window_sized_resources.deinit();
+    errdefer swapchain.deinit();
 
     const imgui_context = c.ImGui_CreateContext(null) orelse return error.ImGuiCreateContextFailed;
     errdefer c.ImGui_DestroyContext(imgui_context);
@@ -569,7 +574,7 @@ pub fn init(allocator: std.mem.Allocator, options: InitOptions) !Renderer {
         .surface = surface,
         .surface_format = surface_format,
         .present_mode = present_mode,
-        .window_sized_resources = window_sized_resources,
+        .swapchain = swapchain,
 
         .depth_format = depth_format,
 
@@ -614,7 +619,7 @@ pub fn deinit(self: Renderer) void {
         c.wgpuBindGroupLayoutRelease(layout);
     }
 
-    self.window_sized_resources.deinit();
+    self.swapchain.deinit();
     c.wgpuSurfaceUnconfigure(self.surface);
     c.wgpuSurfaceRelease(self.surface);
 
@@ -622,9 +627,14 @@ pub fn deinit(self: Renderer) void {
     c.wgpuDeviceRelease(self.device);
 }
 
-pub fn recreateWindowSizedResources(self: *Renderer, extent: math.Extent2D) void {
-    self.window_sized_resources.deinit();
-    const window_sized_resources = createWindowSizedResources(
+pub fn recreateSwapchain(self: *Renderer, extent: math.Extent2D) void {
+    self.swapchain.deinit();
+    // TODO: This should use the same logic as in init.
+    self.present_mode = c.WGPUPresentMode_Immediate;
+    if (self.vsync) {
+        self.present_mode = c.WGPUPresentMode_Fifo;
+    }
+    const swapchain = createSwapchain(
         self.device,
         extent,
         self.surface,
@@ -632,8 +642,8 @@ pub fn recreateWindowSizedResources(self: *Renderer, extent: math.Extent2D) void
         self.surface_format,
         self.depth_format,
     );
-    errdefer window_sized_resources.deinit();
-    self.window_sized_resources = window_sized_resources;
+    errdefer swapchain.deinit();
+    self.swapchain = swapchain;
 
     self.frame_data.uniform_data.proj = math.perspectiveInverseDepth(
         std.math.degreesToRadians(80.0),
@@ -935,6 +945,19 @@ pub fn renderFrame(self: *Renderer, delta_time: f32, camera: Camera, models: []c
     self.frame_data.uniform_data.camera_position = camera.position;
     self.frame_data.uploadToGpu(self.queue);
 
+    c.ImGuiBackendBeginFrame();
+    c.ImGui_NewFrame();
+
+    renderStatistics(delta_time);
+    if (c.ImGui_Begin("Settings", &self.settings_open, c.ImGuiWindowFlags_None)) {
+        if (c.ImGui_Checkbox("VSync", &self.vsync)) {
+            self.recreateSwapchain(self.swapchain.extent);
+        }
+    }
+    c.ImGui_End();
+
+    c.ImGui_Render();
+
     const view = wgpu.surfaceGetNextTextureView(
         self.surface,
         self.surface_format,
@@ -943,7 +966,7 @@ pub fn renderFrame(self: *Renderer, delta_time: f32, camera: Camera, models: []c
         error.SurfaceTextureSuboptimal,
         => {
             const extent = glfw.getFramebufferSize(self.window);
-            self.recreateWindowSizedResources(extent);
+            self.recreateSwapchain(extent);
             return;
         },
         error.OutOfMemory,
@@ -955,13 +978,6 @@ pub fn renderFrame(self: *Renderer, delta_time: f32, camera: Camera, models: []c
         },
     };
     defer c.wgpuTextureViewRelease(view);
-
-    c.ImGuiBackendBeginFrame();
-    c.ImGui_NewFrame();
-
-    renderStatistics(delta_time);
-
-    c.ImGui_Render();
 
     const encoder = c.wgpuDeviceCreateCommandEncoder(self.device, &.{});
     defer c.wgpuCommandEncoderRelease(encoder);
@@ -975,7 +991,7 @@ pub fn renderFrame(self: *Renderer, delta_time: f32, camera: Camera, models: []c
             .clearValue = wgpu.color(1.0, 0.0, 1.0, 1.0),
         },
         .depthStencilAttachment = &.{
-            .view = self.window_sized_resources.depth_texture_view,
+            .view = self.swapchain.depth_texture_view,
             .depthLoadOp = c.WGPULoadOp_Clear,
             .depthStoreOp = c.WGPUStoreOp_Store,
             .depthClearValue = 0.0,
@@ -1048,14 +1064,14 @@ pub fn renderFrame(self: *Renderer, delta_time: f32, camera: Camera, models: []c
     _ = c.wgpuDevicePoll(self.device, @intFromBool(false), null);
 }
 
-fn createWindowSizedResources(
+fn createSwapchain(
     device: c.WGPUDevice,
     extent: math.Extent2D,
     surface: c.WGPUSurface,
     present_mode: c.WGPUPresentMode,
     surface_format: c.WGPUTextureFormat,
     depth_format: c.WGPUTextureFormat,
-) WindowSizedResources {
+) Swapchain {
     c.wgpuSurfaceConfigure(surface, &.{
         .device = device,
         .format = surface_format,
@@ -1094,6 +1110,7 @@ fn createWindowSizedResources(
     errdefer c.wgpuTextureViewRelease(depth_texture_view);
 
     return .{
+        .extent = extent,
         .depth_texture = depth_texture,
         .depth_texture_view = depth_texture_view,
     };
