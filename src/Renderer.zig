@@ -27,6 +27,7 @@ surface: c.WGPUSurface,
 surface_format: c.WGPUTextureFormat,
 present_mode: c.WGPUPresentMode,
 swapchain: Swapchain,
+should_recreate_swapchain: bool = false,
 vsync: bool = false,
 
 depth_format: c.WGPUTextureFormat,
@@ -628,6 +629,13 @@ pub fn deinit(self: Renderer) void {
 }
 
 pub fn recreateSwapchain(self: *Renderer, extent: math.Extent2D) void {
+    // Need to defer recreation until extent is non-zero.
+    if (extent.width == 0.0 and extent.height == 0.0) {
+        self.should_recreate_swapchain = true;
+        return;
+    }
+
+    self.should_recreate_swapchain = false;
     self.swapchain.deinit();
     // TODO: This should use the same logic as in init.
     self.present_mode = c.WGPUPresentMode_Immediate;
@@ -940,6 +948,15 @@ fn loadNodes(
 }
 
 pub fn renderFrame(self: *Renderer, delta_time: f32, camera: Camera, models: []const Model) void {
+    if (self.should_recreate_swapchain) {
+        const extent = glfw.getFramebufferSize(self.window);
+        self.recreateSwapchain(extent);
+        // If recreation failed, then extent was still 0, and this flag will still be set.
+        if (self.should_recreate_swapchain) {
+            return;
+        }
+    }
+
     const camera_matrices = camera.computeMatrices();
     self.frame_data.uniform_data.view = camera_matrices.view;
     self.frame_data.uniform_data.camera_position = camera.position;

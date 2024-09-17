@@ -71,6 +71,9 @@ pub const Vec2 = @Vector(2, f32);
 pub const Vec3 = @Vector(3, f32);
 pub const Vec4 = @Vector(4, f32);
 
+pub const Vec2i = @Vector(2, i32);
+pub const Vec2u = @Vector(2, u32);
+
 pub const Mat4 = [4]Vec4;
 pub const Mat4x3 = [3]Vec4;
 
@@ -138,6 +141,14 @@ pub fn vec4Scale(vec: Vec4, factor: f32) Vec4 {
     const factor_vec4: Vec4 = @splat(factor);
     const scaled = vec * factor_vec4;
     return scaled;
+}
+
+pub fn vec2iZero() Vec2i {
+    return .{ 0, 0 };
+}
+
+pub fn vec2uZero() Vec2u {
+    return .{ 0, 0 };
 }
 
 pub fn mat4Zero() Mat4 {

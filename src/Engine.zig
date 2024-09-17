@@ -15,6 +15,10 @@ allocator: std.mem.Allocator,
 data_dir: std.fs.Dir,
 
 window: *c.GLFWwindow,
+monitor: *c.GLFWmonitor,
+window_size: math.Vec2u,
+window_position: math.Vec2i,
+fullscreen: bool = false,
 
 renderer: Renderer,
 imgui_io: *c.ImGuiIO,
@@ -47,11 +51,14 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
     if (c.glfwInit() != c.GLFW_TRUE) return error.GlfwInitFailed;
     errdefer c.glfwTerminate();
 
+    const monitor = c.glfwGetPrimaryMonitor().?;
+
+    const window_size: math.Vec2u = .{ 1280, 720 };
     c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_NO_API);
     c.glfwWindowHint(c.GLFW_COCOA_RETINA_FRAMEBUFFER, c.GLFW_TRUE);
     const window = c.glfwCreateWindow(
-        1280,
-        720,
+        @intCast(window_size[0]),
+        @intCast(window_size[1]),
         "3D Renderer (WGPU)",
         null,
         null,
@@ -139,6 +146,9 @@ pub fn init(allocator: std.mem.Allocator) !*Engine {
         .data_dir = data_dir,
 
         .window = window,
+        .monitor = monitor,
+        .window_size = window_size,
+        .window_position = math.vec2iZero(),
 
         .renderer = renderer,
         .imgui_io = c.ImGui_GetIO(),
@@ -220,13 +230,48 @@ fn onFramebufferSizeChanged(self: *Engine, extent: math.Extent2D) void {
 
 fn onKeyAction(self: *Engine, key: c_int, scancode: c_int, action: c_int, modifiers: c_int) void {
     _ = scancode; // autofix
-    _ = action; // autofix
-    _ = modifiers; // autofix
     // TODO: This should probably be in `Engine.update`.
-    if (key == c.GLFW_KEY_ESCAPE) {
+    if (action == c.GLFW_PRESS and key == c.GLFW_KEY_ESCAPE) {
         if (self.mouse_captured) {
             self.mouse_captured = false;
             c.glfwSetInputMode(self.window, c.GLFW_CURSOR, c.GLFW_CURSOR_NORMAL);
+        }
+    } else if (action == c.GLFW_PRESS and key == c.GLFW_KEY_ENTER and (modifiers & c.GLFW_MOD_ALT != 0)) {
+        // TODO: This is cool, but toggling fullscreen with keybinds is kind of
+        // outdated. This should probably be controlled by a setting. Plus,
+        // it doesn't work well with macOS native fullscreen mode.
+        self.fullscreen = !self.fullscreen;
+        if (self.fullscreen) {
+            var x: c_int = undefined;
+            var y: c_int = undefined;
+            c.glfwGetWindowPos(self.window, &x, &y);
+            self.window_position = .{ @intCast(x), @intCast(y) };
+
+            var width: c_int = undefined;
+            var height: c_int = undefined;
+            c.glfwGetWindowSize(self.window, &width, &height);
+            self.window_size = .{ @intCast(width), @intCast(height) };
+
+            const mode = c.glfwGetVideoMode(self.monitor);
+            c.glfwSetWindowMonitor(
+                self.window,
+                self.monitor,
+                0,
+                0,
+                mode.*.width,
+                mode.*.height,
+                mode.*.refreshRate,
+            );
+        } else {
+            c.glfwSetWindowMonitor(
+                self.window,
+                null,
+                @intCast(self.window_position[0]),
+                @intCast(self.window_position[1]),
+                @intCast(self.window_size[0]),
+                @intCast(self.window_size[1]),
+                c.GLFW_DONT_CARE,
+            );
         }
     }
 }
